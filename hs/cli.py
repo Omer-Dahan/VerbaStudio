@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -19,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Burn locally generated Hebrew subtitles into a video.",
     )
     parser.add_argument("video", type=Path)
-    parser.add_argument("-o", "--output", type=Path)
+    parser.add_argument("-o", "--output")
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--language", choices=("en", "he"))
     parser.add_argument("--device", default="cuda")
@@ -41,7 +42,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.glossary and not args.glossary.is_file():
         raise SystemExit(f"Glossary not found: {args.glossary}")
 
-    output = (args.output or video.with_name(f"{video.stem}.subtitled.mp4")).resolve()
+    try:
+        output = resolve_output_path(video, args.output)
+    except ValueError as error:
+        build_parser().error(str(error))
     artifact_base = output.with_suffix("")
     ass_path = artifact_base.with_suffix(".ass")
     qa_json = artifact_base.with_suffix(".qa.json")
@@ -80,6 +84,19 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def resolve_output_path(video: Path, output: str | None) -> Path:
+    if output is None:
+        return video.with_name(f"{video.stem}.subtitled.mp4").resolve()
+
+    requested = Path(output).expanduser()
+    if requested.is_dir() or output.endswith((os.sep, "/")):
+        return (requested / f"{video.stem}_he.mp4").resolve()
+    if requested.suffix.casefold() == ".mp4":
+        return requested.resolve()
+    raise ValueError(
+        "output must be an existing directory, a path ending in '/', or an .mp4 file"
+    )
+
+
 if __name__ == "__main__":
     sys.exit(main())
-
