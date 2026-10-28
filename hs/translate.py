@@ -237,6 +237,15 @@ def _post_json(endpoint: str, payload: dict, timeout: float) -> dict:
         return json.load(response)
 
 
+def server_is_healthy(base_url: str, timeout: float = 2.0) -> bool:
+    request = urllib.request.Request(f"{base_url.rstrip('/')}/health", method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status == 200
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
 def _history_messages(history: list[tuple[str, str]]) -> list[dict[str, str]]:
     return [
         {"role": role, "content": content}

@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from hs.models import Cue
 from hs.translate import (
@@ -8,6 +9,7 @@ from hs.translate import (
     build_prompt,
     is_sane_translation,
     load_glossary,
+    server_is_healthy,
 )
 
 
@@ -112,3 +114,13 @@ def test_context_uses_separate_turns_and_is_capped_at_two_pairs() -> None:
         {"role": "assistant", "content": "אחרון"},
         {"role": "user", "content": '"current"'},
     ]
+
+
+def test_server_health_requires_http_200() -> None:
+    response = Mock(status=200)
+    response.__enter__ = Mock(return_value=response)
+    response.__exit__ = Mock(return_value=False)
+    with patch("hs.translate.urllib.request.urlopen", return_value=response) as urlopen:
+        assert server_is_healthy("http://127.0.0.1:8189/") is True
+
+    assert urlopen.call_args.args[0].full_url == "http://127.0.0.1:8189/health"

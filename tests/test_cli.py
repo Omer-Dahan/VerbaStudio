@@ -8,6 +8,11 @@ from hs.cli import build_parser, main, resolve_output_path
 from hs.models import Word
 
 
+@pytest.fixture(autouse=True)
+def healthy_translation_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("hs.cli.server_is_healthy", lambda _url: True)
+
+
 def test_output_directory_uses_hebrew_suffixed_filename(tmp_path: Path) -> None:
     video = tmp_path / "source.mp4"
     destination = tmp_path / "rendered"
@@ -121,6 +126,27 @@ def test_translation_failure_returns_exit_five(tmp_path: Path) -> None:
         patch("hs.cli.TranslationClient.translate_cues", side_effect=fail_translation),
     ):
         assert main([str(video)]) == 5
+
+
+def test_unavailable_translation_server_returns_exit_five(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.touch()
+    monkeypatch.setattr("hs.cli.server_is_healthy", lambda _url: False)
+    with (
+        patch("hs.cli.probe_video", return_value={"width": 1, "height": 1, "duration": 2.0}),
+        patch("hs.cli.has_audio_stream", return_value=True),
+        patch("hs.cli.extract_audio"),
+        patch("hs.cli.transcribe", return_value=([Word(0, 1, "hello")], "en")),
+    ):
+        assert main([str(video), "--api-base", "http://127.0.0.1:8189"]) == 5
+
+    error = capsys.readouterr().err
+    assert "http://127.0.0.1:8189/health" in error
+    assert "must be running" in error
 
 
 def test_repeat_run_uses_cache_and_force_bypasses_it(

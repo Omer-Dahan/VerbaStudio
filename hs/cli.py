@@ -17,7 +17,7 @@ from hs.qa import build_report, write_report
 from hs.segment import segment_words
 from hs.srt import write_srt
 from hs.transcribe import DEFAULT_MODEL, transcribe
-from hs.translate import DEFAULT_BASE_URL, TranslationClient
+from hs.translate import DEFAULT_BASE_URL, TranslationClient, server_is_healthy
 
 
 class PipelineError(RuntimeError):
@@ -155,6 +155,12 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     manifest["lang"] = source_language
     translate_started = time.perf_counter()
     if not args.no_translate:
+        if not server_is_healthy(args.api_base):
+            health_url = f"{args.api_base.rstrip('/')}/health"
+            raise PipelineError(
+                f"Translation server {health_url} is unavailable; the server must be running",
+                5,
+            )
         try:
             TranslationClient(args.api_base, args.translate_mode).translate_cues(
                 cues, source_language, args.glossary, args.gender
