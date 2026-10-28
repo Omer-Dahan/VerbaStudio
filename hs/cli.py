@@ -33,10 +33,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("video", type=Path)
     parser.add_argument("-o", "--output")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help=f"ASR model (default: {DEFAULT_MODEL})",
+    )
     parser.add_argument("--language", choices=("en", "he"))
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--compute-type", default="float16")
+    parser.add_argument(
+        "--compute-type",
+        default="int8_float16",
+        help="CTranslate2 compute type (default: int8_float16; fits 16GB with the translation server resident)",
+    )
     parser.add_argument("--no-translate", action="store_true")
     parser.add_argument("--translate-mode", choices=("chat", "completion", "api"), default="chat")
     parser.add_argument("--api-base", default=DEFAULT_BASE_URL)

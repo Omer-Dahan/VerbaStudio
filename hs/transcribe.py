@@ -12,7 +12,7 @@ def transcribe(
     model_name: str = DEFAULT_MODEL,
     language: str | None = None,
     device: str = "cuda",
-    compute_type: str = "float16",
+    compute_type: str = "int8_float16",
 ) -> tuple[list[Word], str]:
     from faster_whisper import WhisperModel
 
@@ -40,4 +40,3 @@ def _segment_words(segment: Any) -> list[Word]:
         for word in (segment.words or [])
         if word.start is not None and word.end is not None and word.word.strip()
     ]
-

@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from hs.cli import main, resolve_output_path
+from hs.cli import build_parser, main, resolve_output_path
 from hs.models import Word
 
 
@@ -14,6 +14,14 @@ def test_output_directory_uses_hebrew_suffixed_filename(tmp_path: Path) -> None:
     destination.mkdir()
 
     assert resolve_output_path(video, str(destination)) == destination / "source_he.mp4"
+
+
+def test_defaults_fit_sixteen_gigabyte_gpu() -> None:
+    args = build_parser().parse_args(["source.mp4"])
+
+    assert args.model == "Systran/faster-whisper-large-v3"
+    assert args.compute_type == "int8_float16"
+    assert "fits 16GB" in " ".join(build_parser().format_help().split())
 
 
 def test_explicit_mp4_output_is_used_exactly(tmp_path: Path) -> None:
