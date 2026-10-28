@@ -38,6 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--translate-mode", choices=("chat", "completion", "api"), default="chat")
     parser.add_argument("--api-base", default=DEFAULT_BASE_URL)
     parser.add_argument("--glossary", type=Path)
+    parser.add_argument("--gender", choices=("m", "f"))
     parser.add_argument("--font", default=DEFAULT_FONT)
     parser.add_argument("--dry-run", action="store_true", help="Write ASS and QA files without burning video")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable run manifest")
@@ -111,7 +112,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     if not args.no_translate:
         try:
             TranslationClient(args.api_base, args.translate_mode).translate_cues(
-                cues, source_language, args.glossary
+                cues, source_language, args.glossary, args.gender
             )
         except (OSError, RuntimeError, ValueError) as error:
             raise PipelineError(f"Translation failed: {error}", 5) from error

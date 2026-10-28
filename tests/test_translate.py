@@ -41,7 +41,12 @@ def test_client_retries_prompt_echo_and_accepts_hebrew() -> None:
     assert client.translate_text("How are you today?", "en") == "מה שלומך היום?"
     assert len(calls) == 2
     assert calls[0][1]["temperature"] == 0.0
-    assert calls[1][1]["messages"][0]["content"].endswith("How are you today?")
+    assert calls[0][1]["messages"][0]["content"] == '"How are you today?"'
+    assert calls[1][1]["messages"][0]["content"] == "How are you today?"
+    assert calls[0][1]["chat_template_kwargs"] == {
+        "source_lang_code": "en",
+        "target_lang_code": "he-IL",
+    }
 
 
 def test_failed_translation_preserves_source_and_marks_cue() -> None:
@@ -68,3 +73,22 @@ def test_glossary_is_deterministic_and_validated(tmp_path: Path) -> None:
 
     glossary = load_glossary(path)
     assert apply_glossary("טיסה לניו יורק", glossary) == "טיסה לנ״י"
+
+
+def test_gender_hint_follows_source_and_never_appears_in_output() -> None:
+    calls = []
+
+    def request(endpoint, payload, timeout):
+        calls.append(payload)
+        return {"choices": [{"message": {"content": "מה שלומך?"}}]}
+
+    client = TranslationClient(request=request)
+    output = client.translate_text("How are you?", "en", gender="m")
+
+    hint = "(The speaker is a man; use masculine forms.)"
+    assert output == "מה שלומך?"
+    assert hint not in output
+    assert calls[0]["messages"][0]["content"] == f'"How are you?"\n\n{hint}'
+    assert build_prompt("How are you?", "English", "en", gender="m").endswith(
+        f'"How are you?"\n\n{hint}'
+    )

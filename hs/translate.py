@@ -1,4 +1,5 @@
 import json
+import math
 import re
 import urllib.error
 import urllib.request
@@ -23,6 +24,10 @@ PROMPT_TEMPLATE = """You are a professional {source_lang} ({source_code}) to {ta
 Produce only the {target_lang} translation, without any additional explanations or commentary. Please translate the following {source_lang} text into {target_lang}:
 
 {text}"""
+GENDER_HINTS = {
+    "m": "(The speaker is a man; use masculine forms.)",
+    "f": "(The speaker is a woman; use feminine forms.)",
+}
 
 
 class TranslationClient:
@@ -45,10 +50,11 @@ class TranslationClient:
         cues: list[Cue],
         source_code: str,
         glossary_path: Path | None = None,
+        gender: str | None = None,
     ) -> list[Cue]:
         glossary = load_glossary(glossary_path) if glossary_path else {}
         for cue in cues:
-            translation = self.translate_text(cue.source, source_code)
+            translation = self.translate_text(cue.source, source_code, gender=gender)
             if translation is None:
                 cue.text = cue.source
                 cue.translation_failed = True
@@ -56,26 +62,55 @@ class TranslationClient:
                 cue.text = apply_glossary(translation, glossary)
         return cues
 
-    def translate_text(self, source: str, source_code: str) -> str | None:
+    def translate_text(
+        self, source: str, source_code: str, gender: str | None = None
+    ) -> str | None:
         source_lang = _language_name(source_code)
         attempts = ((True, 0.0), (False, 0.0), (True, 0.3))
         for quoted, temperature in attempts:
-            prompt = build_prompt(source, source_lang, source_code, quoted=quoted)
+            prompt = build_prompt(source, source_lang, source_code, quoted=quoted, gender=gender)
             try:
-                output = self._complete(prompt, source, temperature).strip()
+                output = self._complete(
+                    prompt, source, source_code, temperature, quoted=quoted, gender=gender
+                ).strip()
             except (urllib.error.URLError, TimeoutError, ValueError, KeyError, json.JSONDecodeError):
                 continue
             if is_sane_translation(source, output):
                 return output.strip('"').strip()
         return None
 
-    def _complete(self, prompt: str, source: str, temperature: float) -> str:
-        max_tokens = min(400, max(1, 3 * len(source.split())))
+    def _complete(
+        self,
+        prompt: str,
+        source: str,
+        source_code: str,
+        temperature: float,
+        quoted: bool,
+        gender: str | None,
+    ) -> str:
+        source_tokens = max(len(source.split()), math.ceil(len(source) / 4))
+        max_tokens = min(400, max(1, 3 * source_tokens))
         if self.mode == "completion":
             endpoint = f"{self.base_url}/v1/completions"
             wrapped = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
             payload = {
                 "prompt": wrapped,
+                "temperature": temperature,
+                "top_p": 1,
+                "max_tokens": max_tokens,
+                "stop": ["<end_of_turn>"],
+            }
+        elif self.mode == "chat":
+            endpoint = f"{self.base_url}/v1/chat/completions"
+            content = f'"{source}"' if quoted else source
+            if gender:
+                content += f"\n\n{GENDER_HINTS[gender]}"
+            payload = {
+                "messages": [{"role": "user", "content": content}],
+                "chat_template_kwargs": {
+                    "source_lang_code": source_code,
+                    "target_lang_code": "he-IL",
+                },
                 "temperature": temperature,
                 "top_p": 1,
                 "max_tokens": max_tokens,
@@ -107,8 +142,11 @@ def build_prompt(
     source_lang: str,
     source_code: str,
     quoted: bool = True,
+    gender: str | None = None,
 ) -> str:
     text = f'"{source}"' if quoted else source
+    if gender:
+        text += f"\n\n{GENDER_HINTS[gender]}"
     return PROMPT_TEMPLATE.format(
         source_lang=source_lang,
         source_code=source_code,
@@ -169,4 +207,3 @@ def _post_json(endpoint: str, payload: dict, timeout: float) -> dict:
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
-
