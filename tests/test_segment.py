@@ -45,3 +45,23 @@ def test_two_hundred_words_respect_duration_and_word_boundaries() -> None:
     assert flattened == words
     assert all(cue.end - cue.start <= 7.0 for cue in cues)
     assert all(cue.start == cue.words[0].start and cue.end == cue.words[-1].end for cue in cues)
+
+
+def test_segmenter_preserves_every_source_word_when_line_limits_split() -> None:
+    words = make_words(
+        "but the case feels like it is going to fall apart in a week without warning".split()
+    )
+
+    cues = segment_words(words, max_chars=18, max_lines=2)
+
+    assert " ".join(cue.source for cue in cues) == " ".join(word.text for word in words)
+    assert [word for cue in cues for word in cue.words] == words
+    assert len(cues) > 1
+
+
+def test_character_limit_is_applied_to_each_line() -> None:
+    words = make_words(["1234567890", "abcdefghij", "klmnopqrst"])
+
+    cues = segment_words(words, max_chars=10, max_lines=2)
+
+    assert [cue.source for cue in cues] == ["1234567890 abcdefghij", "klmnopqrst"]

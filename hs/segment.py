@@ -18,13 +18,12 @@ def segment_words(
     if not words:
         return []
 
-    max_text_length = max_chars * max_lines
     groups: list[list[Word]] = []
     current: list[Word] = []
 
     for word in words:
         if current and _must_break_before(
-            current, word, max_text_length, max_duration, merge_gap
+            current, word, max_chars, max_lines, max_duration, merge_gap
         ):
             groups.append(current)
             current = []
@@ -42,7 +41,9 @@ def segment_words(
     if current:
         groups.append(current)
 
-    groups = _merge_short_groups(groups, min_duration, max_duration, max_text_length, merge_gap)
+    groups = _merge_short_groups(
+        groups, min_duration, max_duration, max_chars, max_lines, merge_gap
+    )
     return [
         Cue(start=group[0].start, end=group[-1].end, source=_join_words(group), words=group)
         for group in groups
@@ -52,7 +53,8 @@ def segment_words(
 def _must_break_before(
     current: list[Word],
     following: Word,
-    max_text_length: int,
+    max_chars: int,
+    max_lines: int,
     max_duration: float,
     merge_gap: float,
 ) -> bool:
@@ -60,7 +62,7 @@ def _must_break_before(
         return True
     candidate = [*current, following]
     return (
-        len(_join_words(candidate)) > max_text_length
+        not _fits_lines(candidate, max_chars, max_lines)
         or candidate[-1].end - candidate[0].start > max_duration
     )
 
@@ -69,7 +71,8 @@ def _merge_short_groups(
     groups: list[list[Word]],
     min_duration: float,
     max_duration: float,
-    max_text_length: int,
+    max_chars: int,
+    max_lines: int,
     merge_gap: float,
 ) -> list[list[Word]]:
     merged: list[list[Word]] = []
@@ -80,7 +83,7 @@ def _merge_short_groups(
             if (
                 gap < merge_gap
                 and candidate[-1].end - candidate[0].start <= max_duration
-                and len(_join_words(candidate)) <= max_text_length
+                and _fits_lines(candidate, max_chars, max_lines)
             ):
                 merged[-1] = candidate
                 continue
@@ -91,7 +94,7 @@ def _merge_short_groups(
         if (
             merged[1][0].start - merged[0][-1].end < merge_gap
             and candidate[-1].end - candidate[0].start <= max_duration
-            and len(_join_words(candidate)) <= max_text_length
+            and _fits_lines(candidate, max_chars, max_lines)
         ):
             merged[:2] = [candidate]
     return merged
@@ -100,3 +103,19 @@ def _merge_short_groups(
 def _join_words(words: list[Word]) -> str:
     return " ".join(word.text.strip() for word in words).strip()
 
+
+def _fits_lines(words: list[Word], max_chars: int, max_lines: int) -> bool:
+    text_words = [item.text.strip() for item in words if item.text.strip()]
+    if len(text_words) > 1 and any(len(word) > max_chars for word in text_words):
+        return False
+
+    lines = 1
+    line_length = 0
+    for word in text_words:
+        separator = 1 if line_length else 0
+        if line_length and line_length + separator + len(word) > max_chars:
+            lines += 1
+            line_length = len(word)
+        else:
+            line_length += separator + len(word)
+    return lines <= max_lines
