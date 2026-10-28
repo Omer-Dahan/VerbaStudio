@@ -45,10 +45,13 @@ def test_json_failure_is_parseable_and_human_error_uses_stderr(
 
 
 def test_json_success_is_parseable_and_has_required_shape(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     video = tmp_path / "source.mp4"
     video.touch()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     fake_report = {
         "cps_violations": [],
         "silence_overlaps": [],
@@ -60,9 +63,18 @@ def test_json_success_is_parseable_and_has_required_shape(
         patch("hs.cli.extract_audio"),
         patch("hs.cli.transcribe", return_value=([Word(0, 1, "hello")], "en")),
         patch("hs.cli.TranslationClient.translate_cues"),
-        patch("hs.cli.write_ass"),
+        patch(
+            "hs.cli.write_ass",
+            side_effect=lambda _cues, path, *_args: path.write_text("ass", encoding="utf-8"),
+        ),
         patch("hs.cli.build_report", return_value=fake_report),
-        patch("hs.cli.write_report"),
+        patch(
+            "hs.cli.write_report",
+            side_effect=lambda _report, json_path, markdown_path: (
+                json_path.write_text("{}", encoding="utf-8"),
+                markdown_path.write_text("qa", encoding="utf-8"),
+            ),
+        ),
     ):
         exit_code = main([str(video), "--json", "--dry-run"])
 
@@ -101,3 +113,49 @@ def test_translation_failure_returns_exit_five(tmp_path: Path) -> None:
         patch("hs.cli.TranslationClient.translate_cues", side_effect=fail_translation),
     ):
         assert main([str(video)]) == 5
+
+
+def test_repeat_run_uses_cache_and_force_bypasses_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.write_bytes(b"video")
+    output = tmp_path / "result.mp4"
+    cache_home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: cache_home)
+    word = Word(0, 2, "hello")
+    report = {
+        "cps_violations": [],
+        "silence_overlaps": [],
+        "translation_failures": [],
+        "boundary_issues": [],
+    }
+
+    def write_ass_file(_cues, path, *_args):
+        path.write_text("ass", encoding="utf-8")
+
+    def write_report_files(_report, json_path, markdown_path):
+        json_path.write_text("{}", encoding="utf-8")
+        markdown_path.write_text("qa", encoding="utf-8")
+
+    def burn_file(_video, _ass, path):
+        path.write_bytes(b"rendered")
+        return "test"
+
+    with (
+        patch("hs.cli.probe_video", return_value={"width": 1, "height": 1, "duration": 2.0}),
+        patch("hs.cli.has_audio_stream", return_value=True),
+        patch("hs.cli.extract_audio"),
+        patch("hs.cli.transcribe", return_value=([word], "en")) as transcribe_mock,
+        patch("hs.cli.TranslationClient.translate_cues"),
+        patch("hs.cli.write_ass", side_effect=write_ass_file),
+        patch("hs.cli.build_report", return_value=report),
+        patch("hs.cli.write_report", side_effect=write_report_files),
+        patch("hs.cli.burn_subtitles", side_effect=burn_file),
+    ):
+        argv = [str(video), "-o", str(output)]
+        assert main(argv) == 0
+        assert main(argv) == 0
+        assert transcribe_mock.call_count == 1
+        assert main([*argv, "--force"]) == 0
+        assert transcribe_mock.call_count == 2

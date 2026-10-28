@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -10,6 +11,7 @@ from pathlib import Path
 from hs.ass import DEFAULT_FONT, write_ass
 from hs.audio import extract_audio, has_audio_stream, probe_video
 from hs.burn import burn_subtitles
+from hs.cache import cache_key, restore_cache, store_cache
 from hs.cues import characters_per_second, enforce_reading_speed
 from hs.qa import build_report, write_report
 from hs.segment import segment_words
@@ -42,6 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--font", default=DEFAULT_FONT)
     parser.add_argument("--dry-run", action="store_true", help="Write ASS and QA files without burning video")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable run manifest")
+    parser.add_argument("--force", action="store_true", help="Ignore cached transcription and translation")
     return parser
 
 
@@ -79,6 +82,29 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     ass_path = artifact_base.with_suffix(".ass")
     qa_json = artifact_base.with_suffix(".qa.json")
     qa_markdown = artifact_base.with_suffix(".qa.md")
+    cache_settings = _cache_settings(args)
+    cache_dir = Path.home() / ".cache" / "hebrew-subs" / cache_key(video, cache_settings)
+    cache_artifacts = {
+        "subtitles.ass": ass_path,
+        "qa.json": qa_json,
+        "qa.md": qa_markdown,
+    }
+    if not args.force:
+        cached = restore_cache(cache_dir, cache_artifacts)
+        if cached is not None and (args.dry_run or output.is_file()):
+            manifest.update(cached["manifest"])
+            manifest["out"] = None if args.dry_run else str(output)
+            manifest["ok"] = True
+            manifest["exit"] = 0
+            manifest["secs"] = {
+                "asr": 0.0,
+                "translate": 0.0,
+                "burn": 0.0,
+                "total": round(time.perf_counter() - started, 3),
+            }
+            print(f"Cache: {cache_dir}", file=sys.stderr)
+            return 0
+
     try:
         metadata = probe_video(video)
         if not has_audio_stream(video):
@@ -137,6 +163,21 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     }
     print(f"ASS: {ass_path}", file=sys.stderr)
     print(f"QA: {qa_json}", file=sys.stderr)
+    store_cache(
+        cache_dir,
+        cache_artifacts,
+        {
+            "manifest": {
+                "ass": str(ass_path),
+                "lang": manifest["lang"],
+                "cue_count": manifest["cue_count"],
+                "cps_max": manifest["cps_max"],
+                "qa": manifest["qa"],
+            },
+            "transcript": " ".join(word.text for cue in cues for word in cue.words),
+            "cue_source": " ".join(cue.source for cue in cues),
+        },
+    )
     if args.dry_run:
         manifest["ok"] = True
         manifest["secs"]["total"] = round(time.perf_counter() - started, 3)
@@ -169,6 +210,24 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
         "qa": {"cps_violations": 0, "silence_overlaps": 0, "translation_failures": 0},
         "secs": {"asr": 0.0, "translate": 0.0, "burn": 0.0, "total": 0.0},
         "exit": 0,
+    }
+
+
+def _cache_settings(args: argparse.Namespace) -> dict:
+    glossary_hash = None
+    if args.glossary:
+        glossary_hash = hashlib.sha256(args.glossary.read_bytes()).hexdigest()
+    return {
+        "model": args.model,
+        "language": args.language,
+        "device": args.device,
+        "compute_type": args.compute_type,
+        "translate": not args.no_translate,
+        "translate_mode": args.translate_mode,
+        "api_base": args.api_base,
+        "glossary": glossary_hash,
+        "font": args.font,
+        "gender": args.gender,
     }
 
 
