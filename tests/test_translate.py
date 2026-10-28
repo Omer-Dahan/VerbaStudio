@@ -92,3 +92,23 @@ def test_gender_hint_follows_source_and_never_appears_in_output() -> None:
     assert build_prompt("How are you?", "English", "en", gender="m").endswith(
         f'"How are you?"\n\n{hint}'
     )
+
+
+def test_context_uses_separate_turns_and_is_capped_at_two_pairs() -> None:
+    calls = []
+
+    def request(endpoint, payload, timeout):
+        calls.append(payload)
+        return {"choices": [{"message": {"content": "שורה נוכחית"}}]}
+
+    history = [("old", "ישן"), ("previous", "קודם"), ("recent", "אחרון")]
+    client = TranslationClient(request=request)
+    assert client.translate_text("current", "en", history=history) == "שורה נוכחית"
+
+    assert calls[0]["messages"] == [
+        {"role": "user", "content": "previous"},
+        {"role": "assistant", "content": "קודם"},
+        {"role": "user", "content": "recent"},
+        {"role": "assistant", "content": "אחרון"},
+        {"role": "user", "content": '"current"'},
+    ]

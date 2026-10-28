@@ -53,17 +53,26 @@ class TranslationClient:
         gender: str | None = None,
     ) -> list[Cue]:
         glossary = load_glossary(glossary_path) if glossary_path else {}
+        history = list(glossary.items())[-2:]
         for cue in cues:
-            translation = self.translate_text(cue.source, source_code, gender=gender)
+            translation = self.translate_text(
+                cue.source, source_code, gender=gender, history=history
+            )
             if translation is None:
                 cue.text = cue.source
                 cue.translation_failed = True
             else:
                 cue.text = apply_glossary(translation, glossary)
+                history.append((cue.source, cue.text))
+                history = history[-2:]
         return cues
 
     def translate_text(
-        self, source: str, source_code: str, gender: str | None = None
+        self,
+        source: str,
+        source_code: str,
+        gender: str | None = None,
+        history: list[tuple[str, str]] | None = None,
     ) -> str | None:
         source_lang = _language_name(source_code)
         attempts = ((True, 0.0), (False, 0.0), (True, 0.3))
@@ -71,7 +80,13 @@ class TranslationClient:
             prompt = build_prompt(source, source_lang, source_code, quoted=quoted, gender=gender)
             try:
                 output = self._complete(
-                    prompt, source, source_code, temperature, quoted=quoted, gender=gender
+                    prompt,
+                    source,
+                    source_code,
+                    temperature,
+                    quoted=quoted,
+                    gender=gender,
+                    history=(history or [])[-2:],
                 ).strip()
             except (urllib.error.URLError, TimeoutError, ValueError, KeyError, json.JSONDecodeError):
                 continue
@@ -87,12 +102,21 @@ class TranslationClient:
         temperature: float,
         quoted: bool,
         gender: str | None,
+        history: list[tuple[str, str]],
     ) -> str:
         source_tokens = max(len(source.split()), math.ceil(len(source) / 4))
         max_tokens = min(400, max(1, 3 * source_tokens))
         if self.mode == "completion":
             endpoint = f"{self.base_url}/v1/completions"
-            wrapped = f"<start_of_turn>user\n{prompt}<end_of_turn>\n<start_of_turn>model\n"
+            prior_turns = "".join(
+                f"<start_of_turn>user\n{user}<end_of_turn>\n"
+                f"<start_of_turn>model\n{assistant}<end_of_turn>\n"
+                for user, assistant in history
+            )
+            wrapped = (
+                f"{prior_turns}<start_of_turn>user\n{prompt}<end_of_turn>\n"
+                "<start_of_turn>model\n"
+            )
             payload = {
                 "prompt": wrapped,
                 "temperature": temperature,
@@ -105,8 +129,10 @@ class TranslationClient:
             content = f'"{source}"' if quoted else source
             if gender:
                 content += f"\n\n{GENDER_HINTS[gender]}"
+            messages = _history_messages(history)
+            messages.append({"role": "user", "content": content})
             payload = {
-                "messages": [{"role": "user", "content": content}],
+                "messages": messages,
                 "chat_template_kwargs": {
                     "source_lang_code": source_code,
                     "target_lang_code": "he-IL",
@@ -118,8 +144,10 @@ class TranslationClient:
             }
         else:
             endpoint = f"{self.base_url}/v1/chat/completions"
+            messages = _history_messages(history)
+            messages.append({"role": "user", "content": prompt})
             payload = {
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": messages,
                 "temperature": temperature,
                 "top_p": 1,
                 "max_tokens": max_tokens,
@@ -207,3 +235,11 @@ def _post_json(endpoint: str, payload: dict, timeout: float) -> dict:
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
+
+
+def _history_messages(history: list[tuple[str, str]]) -> list[dict[str, str]]:
+    return [
+        {"role": role, "content": content}
+        for source, translation in history[-2:]
+        for role, content in (("user", source), ("assistant", translation))
+    ]
