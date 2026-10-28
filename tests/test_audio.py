@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from hs.audio import extract_audio, probe_video
+from hs.audio import extract_audio, has_audio_stream, probe_video
 
 
 def test_extract_audio_uses_required_pcm_format(tmp_path: Path) -> None:
@@ -31,3 +31,8 @@ def test_probe_video_returns_dimensions_and_duration() -> None:
             "duration": 87.2,
         }
 
+
+def test_audio_stream_probe_reports_missing_audio() -> None:
+    response = Mock(stdout=json.dumps({"streams": []}))
+    with patch("hs.audio.subprocess.run", return_value=response):
+        assert has_audio_stream(Path("silent.mp4")) is False

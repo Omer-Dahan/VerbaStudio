@@ -52,3 +52,19 @@ def probe_video(video_path: Path) -> dict[str, float | int]:
         "duration": float(payload["format"]["duration"]),
     }
 
+
+def has_audio_stream(video_path: Path) -> bool:
+    command = [
+        "ffprobe",
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=index",
+        "-of",
+        "json",
+        str(video_path),
+    ]
+    completed = subprocess.run(command, check=True, capture_output=True, text=True)
+    return bool(json.loads(completed.stdout).get("streams"))
