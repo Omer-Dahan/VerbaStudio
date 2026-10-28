@@ -15,6 +15,7 @@ from hs.cache import cache_key, restore_cache, store_cache
 from hs.cues import characters_per_second, enforce_reading_speed
 from hs.qa import build_report, write_report
 from hs.segment import segment_words
+from hs.srt import write_srt
 from hs.transcribe import DEFAULT_MODEL, transcribe
 from hs.translate import DEFAULT_BASE_URL, TranslationClient
 
@@ -45,6 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true", help="Write ASS and QA files without burning video")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable run manifest")
     parser.add_argument("--force", action="store_true", help="Ignore cached transcription and translation")
+    parser.add_argument("--srt-only", action="store_true", help="Write SRT and ASS files without burning")
+    parser.add_argument("--progress", type=Path, help="Append stage updates as JSON lines")
     return parser
 
 
@@ -68,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
+    _progress(args.progress, "start")
     video = args.video.resolve()
     if not video.is_file():
         raise PipelineError(f"Video not found: {video}", 2)
@@ -80,20 +84,23 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         raise PipelineError(str(error), 2) from error
     artifact_base = output.with_suffix("")
     ass_path = artifact_base.with_suffix(".ass")
+    srt_path = artifact_base.with_suffix(".srt")
     qa_json = artifact_base.with_suffix(".qa.json")
     qa_markdown = artifact_base.with_suffix(".qa.md")
     cache_settings = _cache_settings(args)
     cache_dir = Path.home() / ".cache" / "hebrew-subs" / cache_key(video, cache_settings)
     cache_artifacts = {
         "subtitles.ass": ass_path,
+        "subtitles.srt": srt_path,
         "qa.json": qa_json,
         "qa.md": qa_markdown,
     }
     if not args.force:
         cached = restore_cache(cache_dir, cache_artifacts)
-        if cached is not None and (args.dry_run or output.is_file()):
+        if cached is not None and (args.dry_run or args.srt_only or output.is_file()):
             manifest.update(cached["manifest"])
-            manifest["out"] = None if args.dry_run else str(output)
+            manifest["out"] = None if args.dry_run or args.srt_only else str(output)
+            manifest["srt"] = str(srt_path)
             manifest["ok"] = True
             manifest["exit"] = 0
             manifest["secs"] = {
@@ -103,6 +110,8 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
                 "total": round(time.perf_counter() - started, 3),
             }
             print(f"Cache: {cache_dir}", file=sys.stderr)
+            _progress(args.progress, "cache")
+            _progress(args.progress, "done")
             return 0
 
     try:
@@ -113,6 +122,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         raise
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         raise PipelineError(f"Cannot read input video: {error}", 2) from error
+    _progress(args.progress, "probe")
 
     asr_started = time.perf_counter()
     try:
@@ -128,6 +138,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         raise PipelineError(f"ASR failed: {error}", 4) from error
     manifest["secs"]["asr"] = round(time.perf_counter() - asr_started, 3)
+    _progress(args.progress, "asr")
 
     cues = segment_words(words)
     if not cues:
@@ -145,15 +156,19 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         if any(cue.translation_failed for cue in cues):
             raise PipelineError("Translation failed after all retry attempts", 5)
     manifest["secs"]["translate"] = round(time.perf_counter() - translate_started, 3)
+    _progress(args.progress, "translate")
     cues = enforce_reading_speed(cues)
     write_ass(cues, ass_path, int(metadata["width"]), int(metadata["height"]), args.font)
+    write_srt(cues, srt_path)
     report = build_report(cues, video, float(metadata["duration"]))
     write_report(report, qa_json, qa_markdown)
 
     if report["cps_violations"] or report.get("boundary_issues"):
         raise PipelineError("QA failed: subtitle timing or reading-speed violations remain", 7)
+    _progress(args.progress, "qa")
 
     manifest["ass"] = str(ass_path)
+    manifest["srt"] = str(srt_path)
     manifest["cue_count"] = len(cues)
     manifest["cps_max"] = round(max((characters_per_second(cue) for cue in cues), default=0.0), 2)
     manifest["qa"] = {
@@ -178,9 +193,10 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
             "cue_source": " ".join(cue.source for cue in cues),
         },
     )
-    if args.dry_run:
+    if args.dry_run or args.srt_only:
         manifest["ok"] = True
         manifest["secs"]["total"] = round(time.perf_counter() - started, 3)
+        _progress(args.progress, "done")
         return 0
     burn_started = time.perf_counter()
     try:
@@ -188,10 +204,12 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     except (OSError, subprocess.CalledProcessError) as error:
         raise PipelineError(f"Burn failed: {error}", 6) from error
     manifest["secs"]["burn"] = round(time.perf_counter() - burn_started, 3)
+    _progress(args.progress, "burn")
     manifest["out"] = str(output)
     manifest["ok"] = True
     manifest["secs"]["total"] = round(time.perf_counter() - started, 3)
     print(f"Video: {output} ({codec})", file=sys.stderr)
+    _progress(args.progress, "done")
     return 0
 
 
@@ -243,6 +261,14 @@ def resolve_output_path(video: Path, output: str | None) -> Path:
     raise ValueError(
         "output must be an existing directory, a path ending in '/', or an .mp4 file"
     )
+
+
+def _progress(path: Path | None, stage: str) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"stage": stage}) + "\n")
 
 
 if __name__ == "__main__":

@@ -159,3 +159,43 @@ def test_repeat_run_uses_cache_and_force_bypasses_it(
         assert transcribe_mock.call_count == 1
         assert main([*argv, "--force"]) == 0
         assert transcribe_mock.call_count == 2
+
+
+def test_srt_only_writes_subtitles_and_jsonl_progress(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.write_bytes(b"video")
+    output = tmp_path / "result.mp4"
+    progress = tmp_path / "progress.jsonl"
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    report = {
+        "cps_violations": [],
+        "silence_overlaps": [],
+        "translation_failures": [],
+        "boundary_issues": [],
+    }
+
+    def write_report_files(_report, json_path, markdown_path):
+        json_path.write_text("{}", encoding="utf-8")
+        markdown_path.write_text("qa", encoding="utf-8")
+
+    with (
+        patch("hs.cli.probe_video", return_value={"width": 1, "height": 1, "duration": 2.0}),
+        patch("hs.cli.has_audio_stream", return_value=True),
+        patch("hs.cli.extract_audio"),
+        patch("hs.cli.transcribe", return_value=([Word(0, 2, "hello")], "en")),
+        patch("hs.cli.TranslationClient.translate_cues"),
+        patch("hs.cli.build_report", return_value=report),
+        patch("hs.cli.write_report", side_effect=write_report_files),
+        patch("hs.cli.burn_subtitles") as burn_mock,
+    ):
+        assert main(
+            [str(video), "-o", str(output), "--srt-only", "--progress", str(progress)]
+        ) == 0
+
+    assert output.with_suffix(".ass").is_file()
+    assert output.with_suffix(".srt").is_file()
+    burn_mock.assert_not_called()
+    stages = [json.loads(line)["stage"] for line in progress.read_text().splitlines()]
+    assert stages == ["start", "probe", "asr", "translate", "qa", "done"]
