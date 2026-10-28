@@ -43,3 +43,29 @@ def test_short_cue_is_not_split_below_minimum_duration() -> None:
 
     assert enforce_reading_speed([cue], max_cps=4.0) == [cue]
     assert characters_per_second(cue) > 4.0
+
+
+def test_short_trailing_cue_merges_after_speed_splitting() -> None:
+    cues = [
+        Cue(0.0, 1.6, "a complete cue", "כתובית מלאה"),
+        Cue(1.7, 2.6, "short ending", "סוף קצר"),
+    ]
+
+    merged = enforce_reading_speed(cues)
+
+    assert len(merged) == 1
+    assert merged[0].start == 0.0
+    assert merged[0].end == 2.6
+    assert merged[0].display_text == "כתובית מלאה סוף קצר"
+
+
+def test_available_gaps_are_redistributed_to_remove_cps_violations() -> None:
+    cues = [
+        Cue(0.0, 1.0, "first", "א" * 20),
+        Cue(3.0, 4.0, "second", "ב" * 20),
+    ]
+
+    adjusted = enforce_reading_speed(cues, max_cps=10.0)
+
+    assert [(cue.start, cue.end) for cue in adjusted] == [(0.0, 2.0), (2.0, 4.0)]
+    assert all(characters_per_second(cue) <= 10.0 for cue in adjusted)

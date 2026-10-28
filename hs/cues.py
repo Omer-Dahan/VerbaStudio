@@ -5,7 +5,8 @@ def enforce_reading_speed(cues: list[Cue], max_cps: float = 17.0) -> list[Cue]:
     adjusted: list[Cue] = []
     for cue in cues:
         adjusted.extend(_split_until_readable(cue, max_cps))
-    return adjusted
+    merged = _merge_short_cues(adjusted)
+    return _redistribute_timing(merged, max_cps)
 
 
 def characters_per_second(cue: Cue) -> float:
@@ -104,3 +105,65 @@ def _best_word_boundary(words: list[Word]) -> int | None:
     midpoint = len(words) / 2
     return min(candidates, key=lambda index: abs(index - midpoint))
 
+
+def _merge_short_cues(cues: list[Cue]) -> list[Cue]:
+    merged: list[Cue] = []
+    for cue in cues:
+        if merged and cue.end - cue.start < 1.0:
+            previous = merged[-1]
+            merged[-1] = Cue(
+                start=previous.start,
+                end=cue.end,
+                source=f"{previous.source} {cue.source}".strip(),
+                text=f"{previous.display_text} {cue.display_text}".strip(),
+                words=[*previous.words, *cue.words],
+                translation_failed=previous.translation_failed or cue.translation_failed,
+            )
+        else:
+            merged.append(cue)
+
+    if len(merged) > 1 and merged[0].end - merged[0].start < 1.0:
+        first, following = merged[:2]
+        merged[:2] = [
+            Cue(
+                start=first.start,
+                end=following.end,
+                source=f"{first.source} {following.source}".strip(),
+                text=f"{first.display_text} {following.display_text}".strip(),
+                words=[*first.words, *following.words],
+                translation_failed=first.translation_failed or following.translation_failed,
+            )
+        ]
+    return merged
+
+
+def _redistribute_timing(cues: list[Cue], max_cps: float) -> list[Cue]:
+    if not cues or not any(characters_per_second(cue) > max_cps for cue in cues):
+        return cues
+
+    span = cues[-1].end - cues[0].start
+    character_counts = [len(cue.display_text.replace("\n", "")) for cue in cues]
+    total_characters = sum(character_counts)
+    if span <= 0 or total_characters / span > max_cps:
+        return cues
+
+    retimed: list[Cue] = []
+    cursor = cues[0].start
+    for index, (cue, character_count) in enumerate(zip(cues, character_counts)):
+        end = (
+            cues[-1].end
+            if index == len(cues) - 1
+            else cursor + span * character_count / total_characters
+        )
+        retimed.append(
+            Cue(
+                start=cursor,
+                end=end,
+                source=cue.source,
+                text=cue.text,
+                words=cue.words,
+                translation_failed=cue.translation_failed,
+            )
+        )
+        cursor = end
+    return retimed
