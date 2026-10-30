@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from hs.ass import _ass_text, format_timestamp, subtitle_geometry, write_ass
+from hs.ass import QUOTE_CHARACTERS, _ass_text, format_timestamp, subtitle_geometry, write_ass
 from hs.models import Cue
 
 
@@ -93,11 +93,22 @@ def test_ass_text_uses_lri_only_for_latin_runs() -> None:
     assert rendered.count("\u200f") == 1
 
 
-def test_ass_text_removes_ascii_quotes() -> None:
-    rendered = _ass_text("'יחיד' \"כפול\" `קוד`", max_chars=100)
+def test_ass_text_removes_quotes_in_every_position() -> None:
+    rendered = _ass_text(
+        f"{QUOTE_CHARACTERS}תחילה א{QUOTE_CHARACTERS}מצע סוף{QUOTE_CHARACTERS}",
+        max_chars=100,
+    )
 
-    assert not {"'", '"', "`"} & set(rendered)
-    assert rendered == "יחיד כפול קוד\u200f"
+    assert not set(QUOTE_CHARACTERS) & set(rendered)
+    assert rendered == "תחילה אמצע סוף\u200f"
+
+
+def test_write_ass_never_emits_ascii_quotes(tmp_path: Path) -> None:
+    destination = tmp_path / "quotes.ass"
+    write_ass([Cue(0, 1, "source", "מוצר 'quoted' ו־\"double\"")], destination, 720, 1280)
+
+    dialogue = destination.read_text(encoding="utf-8").split("[Events]\n", 1)[1]
+    assert not {"'", '"', "`"} & set(dialogue)
 
 
 def test_wrapped_ass_text_marks_both_lines_as_rtl() -> None:

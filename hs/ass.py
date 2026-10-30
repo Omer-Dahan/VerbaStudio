@@ -10,7 +10,8 @@ LATIN_RUN = re.compile(
     r"(?=[A-Za-z0-9.,:%$+\-/& ]*[A-Za-z])"
     r"[A-Za-z0-9](?:[A-Za-z0-9]|[.,:%$+\-/&](?=[A-Za-z0-9])| (?=[A-Za-z0-9]))*"
 )
-ASCII_QUOTES = str.maketrans("", "", "'\"`")
+QUOTE_CHARACTERS = "'\"`´’‘“”"
+QUOTE_TRANSLATION = str.maketrans("", "", QUOTE_CHARACTERS)
 LRI = "\u2066"
 PDI = "\u2069"
 RLM = "\u200f"
@@ -74,7 +75,7 @@ def format_timestamp(seconds: float) -> str:
 
 
 def _ass_text(text: str, max_chars: int) -> str:
-    safe = text.translate(ASCII_QUOTES).replace("\\", "＼").replace("{", "｛").replace("}", "｝")
+    safe = text.translate(QUOTE_TRANSLATION).replace("\\", "＼").replace("{", "｛").replace("}", "｝")
     words = safe.replace("\n", " ").split()
     if len(safe) <= max_chars or len(words) < 2:
         return _bidi_line(safe)
