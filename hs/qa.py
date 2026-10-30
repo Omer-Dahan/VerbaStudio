@@ -3,6 +3,7 @@ import re
 import subprocess
 from pathlib import Path
 
+from hs.ass import _ass_text, subtitle_geometry, subtitle_layout
 from hs.cues import characters_per_second
 from hs.models import Cue
 
@@ -12,7 +13,16 @@ SILENCE_END = re.compile(r"silence_end: ([0-9.]+)")
 
 
 def build_report(
-    cues: list[Cue], video_path: Path, duration: float, cps_target: float = 17.0
+    cues: list[Cue],
+    video_path: Path,
+    duration: float,
+    cps_target: float = 17.0,
+    width: int | None = None,
+    height: int | None = None,
+    size_scale: float = 1.20,
+    caption_band: list[int] | None = None,
+    position: str = "auto",
+    margin_v: int | None = None,
 ) -> dict:
     silences = detect_silences(video_path, duration)
     boundary_issues = validate_boundaries(cues, duration)
@@ -43,6 +53,9 @@ def build_report(
                     }
                 )
 
+    layout_bands, layout_conflicts = analyze_layout(
+        cues, width, height, size_scale, caption_band, position, margin_v
+    )
     return {
         "cue_count": len(cues),
         "average_duration": round(sum(durations) / len(durations), 3) if durations else 0.0,
@@ -66,6 +79,8 @@ def build_report(
         "boundary_issues": boundary_issues,
         "silences": [{"start": start, "end": end} for start, end in silences],
         "silence_overlaps": silence_overlaps,
+        "layout_bands": layout_bands,
+        "layout_conflicts": layout_conflicts,
     }
 
 
@@ -85,9 +100,57 @@ def write_report(report: dict, json_path: Path, markdown_path: Path) -> None:
         f"- Low-confidence words: {len(report['low_confidence_words'])}",
         f"- Boundary issues: {len(report['boundary_issues'])}",
         f"- Silence overlaps: {len(report['silence_overlaps'])}",
+        f"- Layout conflicts: {len(report.get('layout_conflicts', []))}",
         "",
     ]
     markdown_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def analyze_layout(
+    cues: list[Cue],
+    width: int | None,
+    height: int | None,
+    size_scale: float,
+    caption_band: list[int] | None,
+    position: str,
+    margin_v: int | None,
+) -> tuple[list[dict], list[dict]]:
+    if width is None or height is None or not caption_band:
+        return [], []
+
+    font_size, _, max_chars = subtitle_geometry(width, height, size_scale)
+    alignment, margin = subtitle_layout(height, caption_band, position, margin_v)
+    caption_top = round(height * caption_band[0] / 100)
+    caption_bottom = round(height * caption_band[1] / 100)
+    bands = []
+    conflicts = []
+    for index, cue in enumerate(cues, start=1):
+        line_count = _ass_text(cue.display_text, max_chars).count(r"\N") + 1
+        text_height = font_size * line_count
+        if alignment == 8:
+            text_top = margin
+            text_bottom = margin + text_height
+        else:
+            text_bottom = height - margin
+            text_top = text_bottom - text_height
+        band = {
+            "cue": index,
+            "font_size": font_size,
+            "line_count": line_count,
+            "margin_v": margin,
+            "text_band": [text_top, text_bottom],
+            "text_band_pct": [
+                round(text_top * 100 / height, 2),
+                round(text_bottom * 100 / height, 2),
+            ],
+            "caption_band": [caption_top, caption_bottom],
+            "caption_band_pct": caption_band,
+            "gap": caption_top - text_bottom,
+        }
+        bands.append(band)
+        if text_bottom > caption_top and text_top < caption_bottom:
+            conflicts.append(band)
+    return bands, conflicts
 
 
 def validate_boundaries(cues: list[Cue], duration: float) -> list[str]:

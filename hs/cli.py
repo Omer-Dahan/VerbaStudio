@@ -274,12 +274,19 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         args.margin_v,
     )
     write_srt(cues, srt_path)
-    report = build_report(cues, video, float(metadata["duration"]), cps_target)
+    report = build_report(
+        cues,
+        video,
+        float(metadata["duration"]),
+        cps_target,
+        int(metadata["width"]),
+        int(metadata["height"]),
+        args.size_scale,
+        existing_captions["band"] if existing_captions["detected"] else None,
+        args.position,
+        args.margin_v,
+    )
     write_report(report, qa_json, qa_markdown)
-
-    if args.strict and (report["cps_violations"] or report.get("boundary_issues")):
-        raise PipelineError("QA failed: subtitle timing or reading-speed violations remain", 7)
-    _progress(args.progress, "qa")
 
     manifest["ass"] = str(ass_path)
     manifest["srt"] = str(srt_path)
@@ -292,7 +299,25 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         "silence_overlaps": report["silence_overlaps"],
         "translation_failures": report["translation_failures"],
         "passthrough": report["passthrough"],
+        "layout_conflicts": report.get("layout_conflicts", []),
     }
+    if report.get("layout_bands"):
+        widest = max(
+            report["layout_bands"],
+            key=lambda band: band["text_band"][1] - band["text_band"][0],
+        )
+        print(
+            "Layout: "
+            f"text={widest['text_band']}px ({widest['text_band_pct']}%) "
+            f"captions={widest['caption_band']}px ({widest['caption_band_pct']}%) "
+            f"gap={widest['gap']}px",
+            file=sys.stderr,
+        )
+    if report.get("layout_conflicts"):
+        raise PipelineError("QA failed: subtitle layout intersects existing captions", 7)
+    if args.strict and (report["cps_violations"] or report.get("boundary_issues")):
+        raise PipelineError("QA failed: subtitle timing or reading-speed violations remain", 7)
+    _progress(args.progress, "qa")
     _, manifest["downscaled"], manifest["quality_floor_hit"] = encoding_decisions(
         float(metadata["duration"]), args.max_size_mb, True
     )
@@ -367,6 +392,7 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
             "silence_overlaps": [],
             "translation_failures": [],
             "passthrough": 0,
+            "layout_conflicts": [],
         },
         "secs": {"asr": 0.0, "translate": 0.0, "burn": 0.0, "total": 0.0},
         "exit": 0,
