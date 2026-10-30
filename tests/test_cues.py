@@ -122,3 +122,9 @@ def test_source_cue_with_fewer_than_three_words_merges_into_neighbour() -> None:
     assert len(normalized) == 1
     assert normalized[0].source == "one two three four five"
     assert normalized[0].display_text == "אחד שניים שלוש ארבע חמש"
+
+
+def test_short_cue_is_never_dropped_by_normalizer() -> None:
+    cue = Cue(1.0, 1.1, "brief", "קצר")
+
+    assert normalize_cues([cue], min_cue_duration=0.40) == [cue]

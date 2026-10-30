@@ -29,6 +29,7 @@ def test_defaults_fit_sixteen_gigabyte_gpu() -> None:
     assert args.size_scale == 1.20
     assert args.box_alpha == 0.55
     assert args.outline == 2.0
+    assert args.min_cue_duration == 0.40
     assert "fits 16GB" in " ".join(build_parser().format_help().split())
 
 

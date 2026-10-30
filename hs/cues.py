@@ -11,7 +11,9 @@ COMMA_BOUNDARY = re.compile(r'[,،]["”’)]?$')
 LATIN_NAME = re.compile(r"[A-Z][A-Za-z0-9'’-]*$")
 
 
-def enforce_reading_speed(cues: list[Cue], max_cps: float = 17.0) -> list[Cue]:
+def enforce_reading_speed(
+    cues: list[Cue], max_cps: float = 17.0, min_cue_duration: float = 0.40
+) -> list[Cue]:
     adjusted: list[Cue] = []
     for cue in cues:
         adjusted.extend(_split_until_readable(cue, max_cps))
@@ -34,7 +36,7 @@ def adaptive_cps_target(cues: list[Cue], duration: float) -> float:
     return min(24.0, max(17.0, source_cps * 1.05))
 
 
-def normalize_cues(cues: list[Cue]) -> list[Cue]:
+def normalize_cues(cues: list[Cue], min_cue_duration: float = 0.40) -> list[Cue]:
     deduplicated: list[Cue] = []
     for cue in cues:
         if deduplicated and cue.text:

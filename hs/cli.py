@@ -91,6 +91,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--srt-only", action="store_true", help="Write SRT and ASS files without burning")
     parser.add_argument("--progress", type=Path, help="Append stage updates as JSON lines")
     parser.add_argument("--strict", action="store_true", help="Exit 7 when subtitle QA violations remain")
+    parser.add_argument(
+        "--min-cue-duration",
+        type=_positive_float,
+        default=0.40,
+        help="Minimum cue duration in seconds (default: 0.40)",
+    )
     return parser
 
 
@@ -217,7 +223,11 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     manifest["secs"]["translate"] = round(time.perf_counter() - translate_started, 3)
     _progress(args.progress, "translate")
     cps_target = adaptive_cps_target(cues, float(metadata["duration"]))
-    cues = enforce_reading_speed(normalize_cues(cues), max_cps=cps_target)
+    cues = enforce_reading_speed(
+        normalize_cues(cues, min_cue_duration=args.min_cue_duration),
+        max_cps=cps_target,
+        min_cue_duration=args.min_cue_duration,
+    )
     write_ass(
         cues,
         ass_path,
@@ -329,6 +339,7 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "outline": args.outline,
         "gender": args.gender,
         "strict": args.strict,
+        "min_cue_duration": args.min_cue_duration,
     }
 
 
