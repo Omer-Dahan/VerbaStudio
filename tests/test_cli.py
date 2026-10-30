@@ -26,7 +26,23 @@ def test_defaults_fit_sixteen_gigabyte_gpu() -> None:
 
     assert args.model == "Systran/faster-whisper-large-v3"
     assert args.compute_type == "int8_float16"
+    assert args.size_scale == 1.20
+    assert args.box_alpha == 0.55
+    assert args.outline == 2.0
     assert "fits 16GB" in " ".join(build_parser().format_help().split())
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        ["--size-scale", "0"],
+        ["--box-alpha", "1.1"],
+        ["--outline", "-1"],
+    ],
+)
+def test_subtitle_style_options_reject_invalid_values(option: list[str]) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["source.mp4", *option])
 
 
 def test_explicit_mp4_output_is_used_exactly(tmp_path: Path) -> None:

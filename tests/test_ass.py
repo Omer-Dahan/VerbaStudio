@@ -55,7 +55,8 @@ def test_ass_uses_video_resolution_style_and_rtl_override(tmp_path: Path) -> Non
     assert "WrapStyle: 0" in content
     assert "ScaledBorderAndShadow: yes" in content
     assert "Style: Default,Ploni DL 1.1 AAA" in content
-    assert ",2,40,40,77,1" in content
+    assert ",3,8,0,2,40,40,77,1" in content
+    assert "&H73000000" in content
     assert "Dialogue: 0,0:00:01.23,0:00:04.57" in content
     assert "{\\q2}שלום עולם\u200f" in content
 
@@ -105,14 +106,34 @@ def test_timestamp_rolls_over_at_hour_boundary() -> None:
 def test_vertical_frame_geometry_scales_font_and_line_budget() -> None:
     font_size, margin, max_chars = subtitle_geometry(576, 1024)
 
-    assert font_size == 46
+    assert font_size == 55
     assert margin == 32
-    assert max_chars == 21
+    assert max_chars == 17
 
 
 def test_font_size_is_clamped_for_extreme_frame_heights() -> None:
-    assert subtitle_geometry(320, 480)[0] == 28
-    assert subtitle_geometry(3840, 2160)[0] == 64
+    assert subtitle_geometry(320, 480)[0] == 34
+    assert subtitle_geometry(3840, 2160)[0] == 77
+
+
+def test_zero_box_alpha_uses_configured_outline_style(tmp_path: Path) -> None:
+    destination = tmp_path / "outlined.ass"
+
+    write_ass(
+        [Cue(0, 1, "source", "עברית")],
+        destination,
+        576,
+        1024,
+        box_alpha=0,
+        outline=4,
+    )
+
+    style = next(
+        line for line in destination.read_text(encoding="utf-8").splitlines()
+        if line.startswith("Style:")
+    )
+    assert ",1,4,0,2," in style
+    assert "&H80000000" in style
 
 
 def test_vertical_ass_has_clear_margins_on_black_frame(tmp_path: Path) -> None:

@@ -67,6 +67,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--glossary", type=Path)
     parser.add_argument("--gender", choices=("m", "f"))
     parser.add_argument("--font", default=DEFAULT_FONT)
+    parser.add_argument(
+        "--size-scale",
+        type=_positive_float,
+        default=1.20,
+        help="Scale the frame-derived subtitle size (default: 1.20)",
+    )
+    parser.add_argument(
+        "--box-alpha",
+        type=_unit_float,
+        default=0.55,
+        help="Subtitle box opacity from 0 to 1; 0 uses the outline style (default: 0.55)",
+    )
+    parser.add_argument(
+        "--outline",
+        type=_nonnegative_float,
+        default=2.0,
+        help="Outline width when --box-alpha is 0 (default: 2)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Write ASS and QA files without burning video")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable run manifest")
     parser.add_argument("--force", action="store_true", help="Ignore cached transcription and translation")
@@ -165,7 +183,9 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     manifest["secs"]["asr"] = round(time.perf_counter() - asr_started, 3)
     _progress(args.progress, "asr")
 
-    _, _, max_chars = subtitle_geometry(int(metadata["width"]), int(metadata["height"]))
+    _, _, max_chars = subtitle_geometry(
+        int(metadata["width"]), int(metadata["height"]), args.size_scale
+    )
     cues = segment_words(words, max_chars=max_chars)
     if not cues:
         raise PipelineError("ASR failed: Whisper produced no timestamped words", 4)
@@ -198,7 +218,16 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     _progress(args.progress, "translate")
     cps_target = adaptive_cps_target(cues, float(metadata["duration"]))
     cues = enforce_reading_speed(normalize_cues(cues), max_cps=cps_target)
-    write_ass(cues, ass_path, int(metadata["width"]), int(metadata["height"]), args.font)
+    write_ass(
+        cues,
+        ass_path,
+        int(metadata["width"]),
+        int(metadata["height"]),
+        args.font,
+        args.size_scale,
+        args.box_alpha,
+        args.outline,
+    )
     write_srt(cues, srt_path)
     report = build_report(cues, video, float(metadata["duration"]), cps_target)
     write_report(report, qa_json, qa_markdown)
@@ -295,6 +324,9 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "server_wait": args.server_wait,
         "glossary": glossary_digest.hexdigest(),
         "font": args.font,
+        "size_scale": args.size_scale,
+        "box_alpha": args.box_alpha,
+        "outline": args.outline,
         "gender": args.gender,
         "strict": args.strict,
     }
@@ -312,6 +344,27 @@ def resolve_output_path(video: Path, output: str | None) -> Path:
     raise ValueError(
         "output must be an existing directory, a path ending in '/', or an .mp4 file"
     )
+
+
+def _positive_float(value: str) -> float:
+    parsed = float(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be greater than 0")
+    return parsed
+
+
+def _unit_float(value: str) -> float:
+    parsed = float(value)
+    if not 0 <= parsed <= 1:
+        raise argparse.ArgumentTypeError("must be between 0 and 1")
+    return parsed
+
+
+def _nonnegative_float(value: str) -> float:
+    parsed = float(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be at least 0")
+    return parsed
 
 
 def wait_for_translation_server(base_url: str, wait_seconds: float) -> bool:

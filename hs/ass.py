@@ -14,8 +14,11 @@ PDI = "\u2069"
 RLM = "\u200f"
 
 
-def subtitle_geometry(width: int, height: int) -> tuple[int, int, int]:
-    font_size = min(64, max(28, round(height * 0.045)))
+def subtitle_geometry(
+    width: int, height: int, size_scale: float = 1.20
+) -> tuple[int, int, int]:
+    base_font_size = min(64, max(28, round(height * 0.045)))
+    font_size = max(1, round(base_font_size * size_scale))
     margin = max(24, round(width * 0.055))
     max_chars = max(1, math.floor((width - 2 * margin) / (0.52 * font_size)))
     return font_size, margin, max_chars
@@ -27,9 +30,16 @@ def write_ass(
     width: int,
     height: int,
     font: str = DEFAULT_FONT,
+    size_scale: float = 1.20,
+    box_alpha: float = 0.55,
+    outline: float = 2.0,
 ) -> Path:
     margin_v = round(height * 0.06)
-    font_size, margin_h, max_chars = subtitle_geometry(width, height)
+    font_size, margin_h, max_chars = subtitle_geometry(width, height, size_scale)
+    boxed = box_alpha > 0
+    border_style = 3 if boxed else 1
+    style_outline = 8 if boxed else outline
+    back_colour = f"&H{round((1 - box_alpha) * 255):02X}000000" if boxed else "&H80000000"
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -39,7 +49,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,{margin_h},{margin_h},{margin_v},1
+Style: Default,{font},{font_size},&H00FFFFFF,&H000000FF,&H00000000,{back_colour},0,0,0,0,100,100,0,0,{border_style},{style_outline:g},0,2,{margin_h},{margin_h},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
