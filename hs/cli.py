@@ -48,6 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-translate", action="store_true")
     parser.add_argument("--translate-mode", choices=("chat", "completion", "api"), default="chat")
     parser.add_argument("--api-base", default=DEFAULT_BASE_URL)
+    parser.add_argument(
+        "--server-wait",
+        type=float,
+        default=300.0,
+        help="Seconds to wait for the translation server to become healthy (default: 300)",
+    )
     parser.add_argument("--glossary", type=Path)
     parser.add_argument("--gender", choices=("m", "f"))
     parser.add_argument("--font", default=DEFAULT_FONT)
@@ -156,10 +162,11 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     manifest["lang"] = source_language
     translate_started = time.perf_counter()
     if not args.no_translate:
-        if not server_is_healthy(args.api_base):
+        if not wait_for_translation_server(args.api_base, args.server_wait):
             health_url = f"{args.api_base.rstrip('/')}/health"
             raise PipelineError(
-                f"Translation server {health_url} is unavailable; the server must be running",
+                f"Translation server {health_url} is unavailable after {args.server_wait:g}s; "
+                "run: systemctl --user start llama-translategemma",
                 5,
             )
         try:
@@ -264,6 +271,7 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "translate": not args.no_translate,
         "translate_mode": args.translate_mode,
         "api_base": args.api_base,
+        "server_wait": args.server_wait,
         "glossary": glossary_hash,
         "font": args.font,
         "gender": args.gender,
@@ -283,6 +291,17 @@ def resolve_output_path(video: Path, output: str | None) -> Path:
     raise ValueError(
         "output must be an existing directory, a path ending in '/', or an .mp4 file"
     )
+
+
+def wait_for_translation_server(base_url: str, wait_seconds: float) -> bool:
+    deadline = time.monotonic() + max(0.0, wait_seconds)
+    while True:
+        if server_is_healthy(base_url):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(5.0, remaining))
 
 
 def _progress(path: Path | None, stage: str) -> None:

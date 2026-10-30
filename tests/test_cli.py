@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import pytest
 
-from hs.cli import build_parser, main, resolve_output_path
+from hs.cli import build_parser, main, resolve_output_path, wait_for_translation_server
 from hs.models import Word
 
 
@@ -143,11 +143,27 @@ def test_unavailable_translation_server_returns_exit_five(
         patch("hs.cli.extract_audio"),
         patch("hs.cli.transcribe", return_value=([Word(0, 1, "hello")], "en")),
     ):
-        assert main([str(video), "--api-base", "http://127.0.0.1:8189"]) == 5
+        assert main(
+            [str(video), "--api-base", "http://127.0.0.1:8189", "--server-wait", "0"]
+        ) == 5
 
     error = capsys.readouterr().err
     assert "http://127.0.0.1:8189/health" in error
-    assert "must be running" in error
+    assert "systemctl --user start llama-translategemma" in error
+
+
+def test_server_preflight_polls_every_five_seconds_until_healthy() -> None:
+    clock = iter([0.0, 0.0, 5.0, 10.0])
+    health = iter([False, False, True])
+
+    with (
+        patch("hs.cli.time.monotonic", side_effect=lambda: next(clock)),
+        patch("hs.cli.time.sleep") as sleep,
+        patch("hs.cli.server_is_healthy", side_effect=lambda _url: next(health)),
+    ):
+        assert wait_for_translation_server("http://127.0.0.1:8189", 300.0) is True
+
+    assert sleep.call_args_list == [call(5.0), call(5.0)]
 
 
 def test_repeat_run_uses_cache_and_force_bypasses_it(
