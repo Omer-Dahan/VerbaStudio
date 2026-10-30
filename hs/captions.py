@@ -1,3 +1,4 @@
+import math
 import subprocess
 from pathlib import Path
 
@@ -37,8 +38,10 @@ def detect_existing_captions(
     if frame_count < 2:
         return {"detected": False, "band": []}
 
-    row_counts = _unstable_white_rows(frames, frame_count, SAMPLE_WIDTH, sample_height)
-    bottom_start = round(sample_height * 0.66)
+    row_counts, row_x_sums = _unstable_white_rows(
+        frames, frame_count, SAMPLE_WIDTH, sample_height
+    )
+    bottom_start = math.ceil(sample_height * 0.70)
     bottom_total = sum(row_counts[bottom_start:])
     window_height = max(1, round(sample_height * 0.20))
     peak_start = max(
@@ -51,11 +54,18 @@ def detect_existing_captions(
     if not detected:
         return {"detected": False, "band": []}
 
+    peak_x_sum = sum(row_x_sums[peak_start:peak_end])
+    mask_center = peak_x_sum / peak_total
+    if not SAMPLE_WIDTH * 0.20 <= mask_center <= SAMPLE_WIDTH * 0.80:
+        return {"detected": False, "band": []}
+
     peak_row_count = max(row_counts[peak_start:peak_end])
     meaningful = max(3, round(peak_row_count * 0.40))
     occupied_rows = [
         row for row in range(peak_start, peak_end) if row_counts[row] >= meaningful
     ]
+    if occupied_rows[0] - bottom_start < round(sample_height * 0.02):
+        return {"detected": False, "band": []}
     top = round(occupied_rows[0] * 100 / sample_height)
     bottom = round((occupied_rows[-1] + 1) * 100 / sample_height)
     return {"detected": True, "band": [top, bottom]}
@@ -63,9 +73,10 @@ def detect_existing_captions(
 
 def _unstable_white_rows(
     frames: bytes, frame_count: int, width: int, height: int
-) -> list[int]:
+) -> tuple[list[int], list[int]]:
     frame_size = width * height * 3
     rows = [0] * height
+    row_x_sums = [0] * height
     for pixel in range(width * height):
         white_frames = 0
         offset = pixel * 3
@@ -74,5 +85,7 @@ def _unstable_white_rows(
             if min(frames[base : base + 3]) >= 220:
                 white_frames += 1
         if 0 < white_frames < frame_count:
-            rows[pixel // width] += 1
-    return rows
+            row = pixel // width
+            rows[row] += 1
+            row_x_sums[row] += pixel % width
+    return rows, row_x_sums

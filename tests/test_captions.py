@@ -12,15 +12,20 @@ HEIGHT = 1024
 DURATION = 12
 
 
-def make_source(path: Path, with_captions: bool) -> None:
+def make_source(
+    path: Path,
+    with_captions: bool,
+    caption_x: str = "(w-text_w)/2",
+    caption_text: str = "EXISTING CAPTION",
+) -> None:
     source = f"color=c=black:s={WIDTH}x{HEIGHT}:d={DURATION}:r=1"
     filters = []
     if with_captions:
         font = Path(__file__).resolve().parent.parent / "fonts/Assistant/Assistant-Bold.ttf"
         filters.append(
             "drawtext="
-            f"fontfile='{font}':text='EXISTING CAPTION':"
-            "fontcolor=white:fontsize=72:x=(w-text_w)/2:y=h*0.85:"
+            f"fontfile='{font}':text='{caption_text}':"
+            f"fontcolor=white:fontsize=72:x={caption_x}:y=h*0.85:"
             "enable='lt(mod(t,2),1)'"
         )
     command = [
@@ -64,6 +69,16 @@ def test_clean_source_keeps_default_bottom_placement(tmp_path: Path) -> None:
 
     assert captions == {"detected": False, "band": []}
     assert subtitle_layout(HEIGHT, None, "auto") == (2, round(HEIGHT * 0.06))
+
+
+def test_left_aligned_bottom_hud_is_not_treated_as_captions(tmp_path: Path) -> None:
+    video = tmp_path / "left-hud.mp4"
+    make_source(video, with_captions=True, caption_x="0", caption_text="CHAT")
+
+    assert detect_existing_captions(video, WIDTH, HEIGHT, DURATION) == {
+        "detected": False,
+        "band": [],
+    }
 
 
 def test_forced_bottom_position_reports_layout_conflict(
