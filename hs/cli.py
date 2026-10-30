@@ -10,7 +10,7 @@ from pathlib import Path
 
 from hs.ass import DEFAULT_FONT, subtitle_geometry, write_ass
 from hs.audio import extract_audio, has_audio_stream, probe_video
-from hs.burn import burn_subtitles
+from hs.burn import burn_subtitles, encoding_decisions
 from hs.cache import cache_key, restore_cache, store_cache
 from hs.cues import (
     adaptive_cps_target,
@@ -271,6 +271,9 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         "translation_failures": report["translation_failures"],
         "passthrough": report["passthrough"],
     }
+    _, manifest["downscaled"], manifest["quality_floor_hit"] = encoding_decisions(
+        float(metadata["duration"]), args.max_size_mb, True
+    )
     print(f"ASS: {ass_path}", file=sys.stderr)
     print(f"QA: {qa_json}", file=sys.stderr)
     store_cache(
@@ -285,6 +288,8 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
                 "cps_target": manifest["cps_target"],
                 "no_word_loss": manifest["no_word_loss"],
                 "qa": manifest["qa"],
+                "downscaled": manifest["downscaled"],
+                "quality_floor_hit": manifest["quality_floor_hit"],
             },
             "transcript": " ".join(word.text for cue in cues for word in cue.words),
             "cue_source": " ".join(cue.source for cue in cues),
@@ -297,7 +302,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         return 0
     burn_started = time.perf_counter()
     try:
-        codec = burn_subtitles(
+        burn_result = burn_subtitles(
             video, ass_path, output, float(metadata["duration"]), args.max_size_mb
         )
     except (OSError, subprocess.CalledProcessError) as error:
@@ -306,9 +311,11 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     _progress(args.progress, "burn")
     manifest["out"] = str(output)
     manifest["size_mb"] = round(output.stat().st_size / 1024**2, 3)
+    manifest["downscaled"] = burn_result.downscaled
+    manifest["quality_floor_hit"] = burn_result.quality_floor_hit
     manifest["ok"] = True
     manifest["secs"]["total"] = round(time.perf_counter() - started, 3)
-    print(f"Video: {output} ({codec})", file=sys.stderr)
+    print(f"Video: {output} ({burn_result.codec})", file=sys.stderr)
     _progress(args.progress, "done")
     return 0
 
@@ -328,6 +335,8 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
         "cps_target": 17.0,
         "no_word_loss": False,
         "size_mb": None,
+        "downscaled": False,
+        "quality_floor_hit": False,
         "qa": {
             "cps_violations": [],
             "forced_cues": [],

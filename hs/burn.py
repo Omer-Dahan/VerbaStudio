@@ -1,6 +1,7 @@
 import json
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -18,15 +19,46 @@ AAC_ENCODE_OPTIONS = [
 ]
 
 
+@dataclass(frozen=True)
+class BurnResult:
+    codec: str
+    downscaled: bool
+    quality_floor_hit: bool
+
+
+def encoding_decisions(
+    duration_s: float, max_size_mb: float, has_audio: bool
+) -> tuple[int, bool, bool]:
+    audio_kbps = 96 if has_audio else 0
+    video_kbps = int((max_size_mb * 8192 / duration_s - audio_kbps) * 0.95)
+    return video_kbps, video_kbps < 700, video_kbps < 500
+
+
 def burn_subtitles(
     video_path: Path,
     ass_path: Path,
     output_path: Path,
     duration_s: float,
     max_size_mb: float = 9.0,
-) -> str:
+) -> BurnResult:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    filter_value = f"ass=filename='{_filter_path(ass_path.resolve())}'"
+    audio_options = _audio_options(video_path)
+    video_kbps, downscaled, quality_floor_hit = encoding_decisions(
+        duration_s, max_size_mb, bool(audio_options)
+    )
+    filters = []
+    if downscaled:
+        filters.append("scale=trunc(iw*0.75/2)*2:trunc(ih*0.75/2)*2")
+        print(
+            f"Video budget is {video_kbps} kbps; scaling output dimensions down by 25%",
+            file=sys.stderr,
+        )
+    if quality_floor_hit:
+        print(
+            f"Warning: video budget is below the 500 kbps quality floor ({video_kbps} kbps)",
+            file=sys.stderr,
+        )
+    filters.append(f"ass=filename='{_filter_path(ass_path.resolve())}'")
     common = [
         "ffmpeg",
         "-hide_banner",
@@ -36,24 +68,21 @@ def burn_subtitles(
         "-i",
         str(video_path),
         "-vf",
-        filter_value,
+        ",".join(filters),
         "-pix_fmt",
         "yuv420p",
     ]
-    audio_options = _audio_options(video_path)
-    video_kbps = int((max_size_mb * 8192 / duration_s - 96) * 0.95)
-
     try:
         subprocess.run(
             _nvenc_command(common, audio_options, output_path, video_kbps), check=True
         )
-        return "h264_nvenc"
+        return BurnResult("h264_nvenc", downscaled, quality_floor_hit)
     except subprocess.CalledProcessError:
         try:
             subprocess.run(
                 _software_command(common, audio_options, output_path, video_kbps), check=True
             )
-            return "libx264"
+            return BurnResult("libx264", downscaled, quality_floor_hit)
         except subprocess.CalledProcessError:
             if audio_options != AAC_ENCODE_OPTIONS:
                 raise
@@ -65,7 +94,7 @@ def burn_subtitles(
                 _software_command(common, ["-c:a", "copy"], output_path, video_kbps),
                 check=True,
             )
-            return "libx264"
+            return BurnResult("libx264", downscaled, quality_floor_hit)
 
 
 def _audio_options(video_path: Path) -> list[str]:
