@@ -35,9 +35,14 @@ def enforce_reading_speed(
         else:
             adjusted.extend(_split_until_readable(cue, max_cps))
     retimed = _borrow_available_time(adjusted, max_cps)
+    line_bounded = [
+        part
+        for cue in retimed
+        for part in _split_to_line_budget(cue, max_chars)
+    ]
     return [
         replace(cue, cps_forced=characters_per_second(cue) > max_cps)
-        for cue in retimed
+        for cue in line_bounded
     ]
 
 

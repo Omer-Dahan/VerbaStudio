@@ -3,6 +3,7 @@ import re
 
 import pytest
 
+from hs.ass import _ass_text
 from hs.cues import (
     characters_per_second,
     enforce_reading_speed,
@@ -287,3 +288,15 @@ def test_short_cue_is_never_dropped_by_normalizer() -> None:
     cue = Cue(1.0, 1.1, "brief", "קצר")
 
     assert normalize_cues([cue], min_cue_duration=0.40) == [cue]
+
+
+def test_long_translated_cue_is_split_to_at_most_two_lines() -> None:
+    translated = " ".join(f"מילה{index}" for index in range(24))
+    source = " ".join(f"word{index}" for index in range(24))
+    cue = Cue(0.0, 12.0, source, translated)
+
+    output = enforce_reading_speed([cue], max_cps=100.0, max_chars=18)
+    line_counts = [_ass_text(part.display_text, 18).count(r"\N") + 1 for part in output]
+
+    assert " ".join(part.display_text for part in output) == translated
+    assert max(line_counts) <= 2
