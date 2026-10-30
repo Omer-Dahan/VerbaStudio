@@ -1,3 +1,6 @@
+import random
+import re
+
 import pytest
 
 from hs.cues import (
@@ -195,6 +198,65 @@ def test_reading_speed_split_repairs_broken_numeric_token() -> None:
 
     assert " ".join(part.display_text for part in parts).count("26.3") == 1
     assert all("26." not in part.display_text or "26.3" in part.display_text for part in parts)
+
+
+@pytest.mark.parametrize("seed", range(40))
+def test_full_pipeline_keeps_generated_numeric_and_latin_tokens_atomic(seed: int) -> None:
+    rng = random.Random(seed)
+    hebrew = ["הוועדה", "בנויה", "מחדש", "ללא", "שינוי", "ממשיכה"]
+    english = ["with", "stable", "release", "for", "users", "today"]
+    numeric_tokens = ["26.3", "1,024", "2026-10-30", "2:30", "5%"]
+    product_names = ["Java Platform", "Open AI", "Product Name"]
+    rng.shuffle(hebrew)
+    rng.shuffle(english)
+    rng.shuffle(numeric_tokens)
+    text = " ".join([
+        *hebrew[:3], product_names[seed % len(product_names)], numeric_tokens[0] + ",",
+        *english[:3], numeric_tokens[1], hebrew[3], numeric_tokens[2], numeric_tokens[3],
+        numeric_tokens[4], *hebrew[4:], *english[3:],
+    ])
+    split_token = rng.choice([token for token in numeric_tokens if re.search(r"[.,:/-]", token)])
+    numeric_start = text.index(split_token)
+    separators = [
+        offset
+        for offset, character in enumerate(split_token, start=1)
+        if character in ".,:/-"
+    ]
+    split_at = numeric_start + rng.choice(separators)
+    fragments = [text[:split_at], text[split_at:]]
+    cues = [
+        Cue(index * 2.0, (index + 1) * 2.0, "source fragment", fragment)
+        for index, fragment in enumerate(fragments)
+    ]
+
+    output = enforce_reading_speed(
+        normalize_cues(cues), max_cps=10.0, max_chars=rng.randrange(12, 25)
+    )
+    rendered = " ".join(cue.display_text for cue in output)
+
+    assert re.search(r"\d+[.,:/-]\s+\d", rendered) is None
+    assert re.search(r"\d\s+[.,:;%]", rendered) is None
+    for token in numeric_tokens:
+        assert token in rendered
+    for cue in output:
+        assert not any(
+            left.endswith(tuple(".,:/-")) and right[:1].isdigit()
+            for left, right in zip(cue.display_text.split(), cue.display_text.split()[1:])
+        )
+
+
+def test_real_java_decimal_fragment_survives_full_pipeline() -> None:
+    cues = [
+        Cue(0.0, 2.0, "first source fragment", "הוועדה ממשיכה עם Java 26."),
+        Cue(2.0, 4.0, "second source fragment", ".3, בנויה מחדש ללא שינוי"),
+    ]
+
+    output = enforce_reading_speed(normalize_cues(cues), max_cps=9.0, max_chars=16)
+    rendered = " ".join(cue.display_text for cue in output)
+
+    assert "Java 26.3, בנויה מחדש" in rendered
+    assert "26. .3" not in rendered
+    assert "26.3 ," not in rendered
 
 
 def test_duplicate_translation_tail_is_removed_from_following_cue() -> None:

@@ -7,7 +7,6 @@ from hs.text import normalize_subtitle_text
 
 MIN_PIECE_DURATION = 0.8
 MAX_CUE_DURATION = 7.0
-TOKEN = re.compile(r'“[^”]*”|"[^"]*"|‘[^’]*’|\d+(?:[.,]\d+)+|\S+')
 SENTENCE_BOUNDARY = re.compile(r'[.!?;:]["”’)]?$')
 COMMA_BOUNDARY = re.compile(r'[,،]["”’)]?$')
 LATIN_NAME = re.compile(r"[A-Z][A-Za-z0-9'’-]*$")
@@ -65,7 +64,7 @@ def _fits_line_budget(text: str, max_chars: int, max_lines: int = 2) -> bool:
 
 
 def _split_to_line_budget(cue: Cue, max_chars: int) -> list[Cue]:
-    display_tokens = TOKEN.findall(cue.display_text)
+    display_tokens = _text_tokens(cue.display_text)
     if len(display_tokens) < 2:
         return [cue]
 
@@ -159,7 +158,7 @@ def _split_until_readable(cue: Cue, max_cps: float) -> list[Cue]:
 
 
 def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
-    display_words = TOKEN.findall(cue.display_text)
+    display_words = _text_tokens(cue.display_text)
     if len(display_words) < 2:
         return None
 
@@ -273,7 +272,7 @@ def _merge_pair(left: Cue, right: Cue) -> Cue:
         start=left.start,
         end=right.end,
         source=f"{left.source} {right.source}".strip(),
-        text=f"{left.display_text} {right.display_text}".strip(),
+        text=_join_text(left.display_text, right.display_text),
         words=[*left.words, *right.words],
         translation_failed=left.translation_failed or right.translation_failed,
         translation_passthrough=(
@@ -301,6 +300,21 @@ def _preferred_text_boundary(tokens: list[str], ratio: float) -> int:
     return min(candidates, key=rank)
 
 
+def _text_tokens(text: str) -> list[str]:
+    tokens = normalize_subtitle_text(text).split()
+    atomic: list[str] = []
+    for token in tokens:
+        if atomic and LATIN_NAME.fullmatch(atomic[-1].split()[-1]) and LATIN_NAME.fullmatch(token):
+            atomic[-1] = f"{atomic[-1]} {token}"
+        else:
+            atomic.append(token)
+    return atomic
+
+
+def _join_text(left: str, right: str) -> str:
+    return normalize_subtitle_text(f"{left} {right}".strip())
+
+
 def _merge_short_cues(cues: list[Cue]) -> list[Cue]:
     merged: list[Cue] = []
     for cue in cues:
@@ -310,7 +324,7 @@ def _merge_short_cues(cues: list[Cue]) -> list[Cue]:
                 start=previous.start,
                 end=cue.end,
                 source=f"{previous.source} {cue.source}".strip(),
-                text=f"{previous.display_text} {cue.display_text}".strip(),
+                text=_join_text(previous.display_text, cue.display_text),
                 words=[*previous.words, *cue.words],
                 translation_failed=previous.translation_failed or cue.translation_failed,
                 translation_passthrough=(
@@ -327,7 +341,7 @@ def _merge_short_cues(cues: list[Cue]) -> list[Cue]:
                 start=first.start,
                 end=following.end,
                 source=f"{first.source} {following.source}".strip(),
-                text=f"{first.display_text} {following.display_text}".strip(),
+                text=_join_text(first.display_text, following.display_text),
                 words=[*first.words, *following.words],
                 translation_failed=first.translation_failed or following.translation_failed,
                 translation_passthrough=(
