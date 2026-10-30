@@ -5,6 +5,13 @@ from hs.models import Cue, Word
 
 SENTENCE_END = re.compile(r"[.?!:׃][\"'”’)]*$")
 COMMA_END = re.compile(r"[,;،][\"'”’)]*$")
+TERMINAL_PUNCTUATION = re.compile(r"[.!?][\"'”’)]*$")
+ENGLISH_VERB = re.compile(
+    r"^(?:am|are|be|been|being|can|could|did|do|does|had|has|have|is|may|might|"
+    r"must|shall|should|was|were|will|would|\w+(?:ed|ing))$",
+    re.IGNORECASE,
+)
+SUBJECT_PRONOUNS = {"he", "i", "it", "she", "they", "we", "you"}
 
 
 def segment_words(
@@ -43,6 +50,9 @@ def segment_words(
 
     groups = _merge_short_groups(
         groups, min_duration, max_duration, max_chars, max_lines, merge_gap
+    )
+    groups = _merge_fragment_groups(
+        groups, max_chars, max_lines, max_duration, merge_gap
     )
     return [
         Cue(start=group[0].start, end=group[-1].end, source=_join_words(group), words=group)
@@ -121,3 +131,80 @@ def _fits_lines(words: list[Word], max_chars: int, max_lines: int) -> bool:
         else:
             line_length += separator + len(word)
     return lines <= max_lines
+
+
+def _merge_fragment_groups(
+    groups: list[list[Word]],
+    max_chars: int,
+    max_lines: int,
+    max_duration: float,
+    merge_gap: float,
+) -> list[list[Word]]:
+    merged: list[list[Word]] = []
+    index = 0
+    while index < len(groups):
+        group = groups[index]
+        if (
+            _is_sentence_fragment(group)
+            and index + 1 < len(groups)
+            and _groups_can_merge(group, groups[index + 1], max_duration, merge_gap)
+        ):
+            merged.extend(
+                _split_group_to_budget([*group, *groups[index + 1]], max_chars, max_lines)
+            )
+            index += 2
+            continue
+        if (
+            _is_sentence_fragment(group)
+            and merged
+            and _groups_can_merge(merged[-1], group, max_duration, merge_gap)
+        ):
+            previous = merged.pop()
+            merged.extend(_split_group_to_budget([*previous, *group], max_chars, max_lines))
+        else:
+            merged.append(group)
+        index += 1
+    return merged
+
+
+def _groups_can_merge(
+    left: list[Word], right: list[Word], max_duration: float, merge_gap: float
+) -> bool:
+    return (
+        right[0].start - left[-1].end < merge_gap
+        and right[-1].end - left[0].start <= max_duration
+    )
+
+
+def _is_sentence_fragment(words: list[Word]) -> bool:
+    text = _join_words(words)
+    source_words = text.split()
+    first_letter = next((character for character in text if character.isalpha()), "")
+    starts_lowercase = bool(first_letter and first_letter.islower())
+    has_verb = (
+        len(source_words) >= 2
+        and source_words[0].strip(".,;:!?\"'()[]").casefold() in SUBJECT_PRONOUNS
+    ) or any(
+        ENGLISH_VERB.fullmatch(word.strip(".,;:!?\"'()[]")) for word in source_words
+    )
+    return (
+        starts_lowercase
+        or TERMINAL_PUNCTUATION.search(text) is None
+        or (len(source_words) < 4 and not has_verb)
+    )
+
+
+def _split_group_to_budget(
+    words: list[Word], max_chars: int, max_lines: int
+) -> list[list[Word]]:
+    chunks: list[list[Word]] = []
+    remaining = words
+    while remaining:
+        split_at = len(remaining)
+        while split_at > 1 and not _fits_lines(
+            remaining[:split_at], max_chars, max_lines
+        ):
+            split_at -= 1
+        chunks.append(remaining[:split_at])
+        remaining = remaining[split_at:]
+    return chunks

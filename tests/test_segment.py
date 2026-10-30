@@ -73,3 +73,71 @@ def test_decimal_tokens_are_joined_without_an_internal_space() -> None:
     cues = segment_words(words)
 
     assert " ".join(cue.source for cue in cues) == "version 26.3 ships"
+
+
+def test_short_nonverbal_fragment_merges_with_following_sentence() -> None:
+    words = make_words(["Mojang's", "code.", "It", "powers", "the", "game."])
+
+    cues = segment_words(words)
+
+    assert [cue.source for cue in cues] == ["Mojang's code. It powers the game."]
+
+
+def test_lowercase_and_unpunctuated_fragments_merge_before_translation() -> None:
+    words = make_words(
+        ["In", "the", "tests,", "developers", "found", "it", "worked."]
+    )
+
+    cues = segment_words(words, max_chars=40)
+
+    assert [cue.source for cue in cues] == [
+        "In the tests, developers found it worked."
+    ]
+
+
+def test_lowercase_fragment_merges_with_preceding_sentence() -> None:
+    words = make_words(
+        ["This", "ends.", "and", "this", "continues."]
+    )
+
+    cues = segment_words(words)
+
+    assert [cue.source for cue in cues] == ["This ends. and this continues."]
+
+
+def test_short_clause_with_subject_and_verb_remains_separate() -> None:
+    words = make_words(
+        ["It", "works.", "Developers", "test", "every", "build."], step=0.65
+    )
+
+    cues = segment_words(words)
+
+    assert [cue.source for cue in cues] == [
+        "It works.",
+        "Developers test every build.",
+    ]
+
+
+def test_merged_fragment_splits_at_word_boundary_to_fit_line_budget() -> None:
+    words = make_words(
+        ["Mojang's", "code.", "Developers", "use", "this", "system", "every", "day."]
+    )
+
+    cues = segment_words(words, max_chars=12, max_lines=2)
+
+    assert [word for cue in cues for word in cue.words] == words
+    assert all(
+        all(len(line) <= 12 for line in _wrap_source(cue.source, 12))
+        for cue in cues
+    )
+
+
+def _wrap_source(text: str, max_chars: int) -> list[str]:
+    lines = [""]
+    for word in text.split():
+        candidate = f"{lines[-1]} {word}".strip()
+        if lines[-1] and len(candidate) > max_chars:
+            lines.append(word)
+        else:
+            lines[-1] = candidate
+    return lines
