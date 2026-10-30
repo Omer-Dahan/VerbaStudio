@@ -1,9 +1,14 @@
 from dataclasses import replace
+import re
 
 from hs.models import Cue, Word
 
 
 MIN_PIECE_DURATION = 0.8
+TOKEN = re.compile(r'“[^”]*”|"[^"]*"|‘[^’]*’|\d+(?:[.,]\d+)+|\S+')
+SENTENCE_BOUNDARY = re.compile(r'[.!?;:]["”’)]?$')
+COMMA_BOUNDARY = re.compile(r'[,،]["”’)]?$')
+LATIN_NAME = re.compile(r"[A-Z][A-Za-z0-9'’-]*$")
 
 
 def enforce_reading_speed(cues: list[Cue], max_cps: float = 17.0) -> list[Cue]:
@@ -38,7 +43,7 @@ def _split_until_readable(cue: Cue, max_cps: float) -> list[Cue]:
 
 
 def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
-    display_words = cue.display_text.split()
+    display_words = TOKEN.findall(cue.display_text)
     if len(display_words) < 2:
         return None
 
@@ -59,10 +64,7 @@ def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
         word_index = min(len(cue.words) - 1, max(1, round(len(cue.words) * boundary_ratio)))
         left_words = cue.words[:word_index]
         right_words = cue.words[word_index:]
-        display_index = min(
-            len(display_words) - 1,
-            max(1, round(len(display_words) * boundary_ratio)),
-        )
+        display_index = _preferred_text_boundary(display_words, boundary_ratio)
         return (
             Cue(
                 start=cue.start,
@@ -82,7 +84,7 @@ def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
             ),
         )
 
-    display_index = min(len(display_words) - 1, max(1, round(len(display_words) * boundary_ratio)))
+    display_index = _preferred_text_boundary(display_words, boundary_ratio)
     return (
         Cue(
             cue.start,
@@ -107,6 +109,24 @@ def _balanced_index(word_count: int, duration: float) -> int | None:
         return None
     midpoint = word_count / 2
     return min(candidates, key=lambda index: abs(index - midpoint))
+
+
+def _preferred_text_boundary(tokens: list[str], ratio: float) -> int:
+    target = len(tokens) * ratio
+    candidates = [
+        index
+        for index in range(1, len(tokens))
+        if not (LATIN_NAME.fullmatch(tokens[index - 1]) and LATIN_NAME.fullmatch(tokens[index]))
+    ]
+    if not candidates:
+        candidates = list(range(1, len(tokens)))
+
+    def rank(index: int) -> tuple[int, float]:
+        previous = tokens[index - 1]
+        priority = 0 if SENTENCE_BOUNDARY.search(previous) else 1 if COMMA_BOUNDARY.search(previous) else 2
+        return priority, abs(index - target)
+
+    return min(candidates, key=rank)
 
 
 def _merge_short_cues(cues: list[Cue]) -> list[Cue]:

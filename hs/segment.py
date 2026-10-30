@@ -101,7 +101,9 @@ def _merge_short_groups(
 
 
 def _join_words(words: list[Word]) -> str:
-    return " ".join(word.text.strip() for word in words).strip()
+    text = " ".join(word.text.strip() for word in words).strip()
+    text = re.sub(r"(?<=\d)\s+([.,])\s*(?=\d)", r"\1", text)
+    return re.sub(r"\s+([,.;:!?])", r"\1", text)
 
 
 def _fits_lines(words: list[Word], max_chars: int, max_lines: int) -> bool:

@@ -81,3 +81,20 @@ def test_cue_borrows_leading_silence_and_following_gap() -> None:
     assert adjusted[0].start == pytest.approx(0.5)
     assert adjusted[0].end == pytest.approx(2.5)
     assert adjusted[0].cps_forced is False
+
+
+def test_split_preserves_decimal_quote_and_latin_name_tokens() -> None:
+    cue = Cue(
+        0.0,
+        4.0,
+        "one two three four five six",
+        'פתיח "מחר בבוקר" גרסה 26.3 עבור Product Name ממשיכה עכשיו',
+    )
+
+    parts = enforce_reading_speed([cue], max_cps=12.0)
+
+    text_parts = [part.display_text for part in parts]
+    assert any('"מחר בבוקר"' in text for text in text_parts)
+    assert any("26.3" in text for text in text_parts)
+    assert any("Product Name" in text for text in text_parts)
+    assert all("26 .3" not in text for text in text_parts)

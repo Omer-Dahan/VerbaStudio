@@ -65,3 +65,11 @@ def test_character_limit_is_applied_to_each_line() -> None:
     cues = segment_words(words, max_chars=10, max_lines=2)
 
     assert [cue.source for cue in cues] == ["1234567890 abcdefghij", "klmnopqrst"]
+
+
+def test_decimal_tokens_are_joined_without_an_internal_space() -> None:
+    words = make_words(["version", "26", ".3", "ships"])
+
+    cues = segment_words(words)
+
+    assert " ".join(cue.source for cue in cues) == "version 26.3 ships"
