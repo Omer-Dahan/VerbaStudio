@@ -6,4 +6,5 @@ __pycache__/
 *.qa.json
 *.qa.md
 *.subtitled.mp4
-
+*.srt
+acceptance/*.mp4

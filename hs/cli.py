@@ -8,7 +8,7 @@ import time
 import subprocess
 from pathlib import Path
 
-from hs.ass import DEFAULT_FONT, write_ass
+from hs.ass import DEFAULT_FONT, subtitle_geometry, write_ass
 from hs.audio import extract_audio, has_audio_stream, probe_video
 from hs.burn import burn_subtitles
 from hs.cache import cache_key, restore_cache, store_cache
@@ -155,7 +155,8 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     manifest["secs"]["asr"] = round(time.perf_counter() - asr_started, 3)
     _progress(args.progress, "asr")
 
-    cues = segment_words(words)
+    _, _, max_chars = subtitle_geometry(int(metadata["width"]), int(metadata["height"]))
+    cues = segment_words(words, max_chars=max_chars)
     if not cues:
         raise PipelineError("ASR failed: Whisper produced no timestamped words", 4)
     source_language = args.language or detected_language

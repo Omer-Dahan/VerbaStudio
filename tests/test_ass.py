@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from hs.ass import format_timestamp, write_ass
+from hs.ass import format_timestamp, subtitle_geometry, write_ass
 from hs.models import Cue
 
 
@@ -34,3 +34,15 @@ def test_long_text_wraps_without_reordering_hebrew(tmp_path: Path) -> None:
 def test_timestamp_rolls_over_at_hour_boundary() -> None:
     assert format_timestamp(3661.999) == "1:01:02.00"
 
+
+def test_vertical_frame_geometry_scales_font_and_line_budget() -> None:
+    font_size, margin, max_chars = subtitle_geometry(576, 1024)
+
+    assert font_size == 46
+    assert margin == 32
+    assert max_chars == 21
+
+
+def test_font_size_is_clamped_for_extreme_frame_heights() -> None:
+    assert subtitle_geometry(320, 480)[0] == 28
+    assert subtitle_geometry(3840, 2160)[0] == 64

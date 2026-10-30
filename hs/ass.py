@@ -1,9 +1,17 @@
 from pathlib import Path
+import math
 
 from hs.models import Cue
 
 
 DEFAULT_FONT = "Ploni DL 1.1 AAA"
+
+
+def subtitle_geometry(width: int, height: int) -> tuple[int, int, int]:
+    font_size = min(64, max(28, round(height * 0.045)))
+    margin = max(24, round(width * 0.055))
+    max_chars = max(1, math.floor((width - 2 * margin) / (0.52 * font_size)))
+    return font_size, margin, max_chars
 
 
 def write_ass(
@@ -14,7 +22,7 @@ def write_ass(
     font: str = DEFAULT_FONT,
 ) -> Path:
     margin_v = round(height * 0.06)
-    font_size = max(24, round(height * 0.047))
+    font_size, margin_h, max_chars = subtitle_geometry(width, height)
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -24,13 +32,13 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,40,40,{margin_v},1
+Style: Default,{font},{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,{margin_h},{margin_h},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     events = [
-        f"Dialogue: 0,{format_timestamp(cue.start)},{format_timestamp(cue.end)},Default,,0,0,0,,{{\\q2}}{_ass_text(cue.display_text)}"
+        f"Dialogue: 0,{format_timestamp(cue.start)},{format_timestamp(cue.end)},Default,,0,0,0,,{{\\q2}}{_ass_text(cue.display_text, max_chars)}"
         for cue in cues
     ]
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -46,10 +54,10 @@ def format_timestamp(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}.{fraction:02d}"
 
 
-def _ass_text(text: str) -> str:
+def _ass_text(text: str, max_chars: int) -> str:
     safe = text.replace("\\", "＼").replace("{", "｛").replace("}", "｝")
     words = safe.replace("\n", " ").split()
-    if len(safe) <= 42 or len(words) < 2:
+    if len(safe) <= max_chars or len(words) < 2:
         return safe
 
     best_index = min(
@@ -57,4 +65,3 @@ def _ass_text(text: str) -> str:
         key=lambda index: abs(len(" ".join(words[:index])) - len(" ".join(words[index:]))),
     )
     return " ".join(words[:best_index]) + r"\N" + " ".join(words[best_index:])
-
