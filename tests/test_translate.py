@@ -117,6 +117,67 @@ def test_glossary_is_deterministic_and_validated(tmp_path: Path) -> None:
     assert apply_glossary("טיסה לניו יורק", glossary) == "טיסה לנ״י"
 
 
+def test_default_glossary_preserves_rust_and_minecraft() -> None:
+    responses = iter(
+        [
+            {"choices": [{"message": {"content": "כתבו את השירות ב-Rust."}}]},
+            {"choices": [{"message": {"content": "שחקו Minecraft יחד."}}]},
+        ]
+    )
+    client = TranslationClient(request=lambda *_args: next(responses))
+    cues = [
+        Cue(0.0, 2.0, "Write the service in Rust."),
+        Cue(2.0, 4.0, "Play Minecraft together."),
+    ]
+
+    client.translate_cues(cues, "en")
+
+    assert "Rust" in cues[0].display_text
+    assert "חלודה" not in cues[0].display_text
+    assert "Minecraft" in cues[1].display_text
+
+
+def test_missing_presubstituted_term_retries_once_without_substitution() -> None:
+    responses = iter(
+        [
+            {"choices": [{"message": {"content": "השתמשו בממשק"}}]},
+            {"choices": [{"message": {"content": "השתמשו בממשק"}}]},
+            {"choices": [{"message": {"content": "השתמשו בממשק"}}]},
+            {"choices": [{"message": {"content": "השתמשו בממשק"}}]},
+        ]
+    )
+    calls = []
+
+    def request(_endpoint, payload, _timeout):
+        calls.append(payload)
+        return next(responses)
+
+    output = TranslationClient(request=request).translate_text(
+        "Use the interface", "en", glossary={"interface": "API"}
+    )
+
+    assert output == "השתמשו בממשק"
+    assert len(calls) == 4
+    assert calls[-1]["messages"][-1]["content"] == '"Use the interface"'
+
+
+def test_identity_glossary_term_also_gets_unprotected_retry() -> None:
+    responses = iter(
+        [
+            {"choices": [{"message": {"content": "כתבו את השירות"}}]},
+            {"choices": [{"message": {"content": "כתבו את השירות"}}]},
+            {"choices": [{"message": {"content": "כתבו את השירות"}}]},
+            {"choices": [{"message": {"content": "כתבו את השירות"}}]},
+        ]
+    )
+
+    output = TranslationClient(request=lambda *_args: next(responses)).translate_text(
+        "Write the service in Rust", "en", glossary={"Rust": "Rust"}
+    )
+
+    assert output == "כתבו את השירות"
+
+
 def test_gender_hint_follows_source_and_never_appears_in_output() -> None:
     calls = []
 

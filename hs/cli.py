@@ -17,7 +17,12 @@ from hs.qa import build_report, write_report
 from hs.segment import segment_words
 from hs.srt import write_srt
 from hs.transcribe import DEFAULT_MODEL, transcribe
-from hs.translate import DEFAULT_BASE_URL, TranslationClient, server_is_healthy
+from hs.translate import (
+    DEFAULT_BASE_URL,
+    DEFAULT_GLOSSARY_PATH,
+    TranslationClient,
+    server_is_healthy,
+)
 
 
 class PipelineError(RuntimeError):
@@ -267,9 +272,9 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
 
 
 def _cache_settings(args: argparse.Namespace) -> dict:
-    glossary_hash = None
+    glossary_digest = hashlib.sha256(DEFAULT_GLOSSARY_PATH.read_bytes())
     if args.glossary:
-        glossary_hash = hashlib.sha256(args.glossary.read_bytes()).hexdigest()
+        glossary_digest.update(args.glossary.read_bytes())
     return {
         "model": args.model,
         "language": args.language,
@@ -279,7 +284,7 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "translate_mode": args.translate_mode,
         "api_base": args.api_base,
         "server_wait": args.server_wait,
-        "glossary": glossary_hash,
+        "glossary": glossary_digest.hexdigest(),
         "font": args.font,
         "gender": args.gender,
         "strict": args.strict,

@@ -12,6 +12,7 @@ from hs.models import Cue
 
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8189"
+DEFAULT_GLOSSARY_PATH = Path(__file__).resolve().parent.parent / "data" / "glossary.yml"
 HEBREW = re.compile(r"[\u0590-\u05ff]")
 LATIN_RUN = re.compile(r"[A-Za-z][A-Za-z0-9.+#'’-]*")
 LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
@@ -54,7 +55,9 @@ class TranslationClient:
         glossary_path: Path | None = None,
         gender: str | None = None,
     ) -> list[Cue]:
-        glossary = load_glossary(glossary_path) if glossary_path else {}
+        glossary = load_glossary(DEFAULT_GLOSSARY_PATH)
+        if glossary_path:
+            glossary.update(load_glossary(glossary_path))
         history = list(glossary.items())[-2:]
         for cue in cues:
             if should_passthrough(cue.source):
@@ -62,7 +65,11 @@ class TranslationClient:
                 cue.translation_passthrough = True
                 continue
             translation = self.translate_text(
-                cue.source, source_code, gender=gender, history=history
+                cue.source,
+                source_code,
+                gender=gender,
+                history=history,
+                glossary=glossary,
             )
             if translation is None:
                 cue.text = cue.source
@@ -79,15 +86,25 @@ class TranslationClient:
         source_code: str,
         gender: str | None = None,
         history: list[tuple[str, str]] | None = None,
+        glossary: dict[str, str] | None = None,
     ) -> str | None:
         source_lang = _language_name(source_code)
+        glossary = glossary or {}
+        substituted = apply_glossary(source, glossary)
+        protected = {
+            replacement
+            for original, replacement in glossary.items()
+            if original in source and replacement in substituted
+        }
         attempts = ((True, 0.0), (False, 0.0), (True, 0.3))
         for quoted, temperature in attempts:
-            prompt = build_prompt(source, source_lang, source_code, quoted=quoted, gender=gender)
+            prompt = build_prompt(
+                substituted, source_lang, source_code, quoted=quoted, gender=gender
+            )
             try:
                 output = self._complete(
                     prompt,
-                    source,
+                    substituted,
                     source_code,
                     temperature,
                     quoted=quoted,
@@ -96,6 +113,24 @@ class TranslationClient:
                 ).strip()
             except (urllib.error.URLError, TimeoutError, ValueError, KeyError, json.JSONDecodeError):
                 continue
+            if is_sane_translation(substituted, output) and all(
+                token.casefold() in output.casefold() for token in protected
+            ):
+                return output.strip('"').strip()
+        if protected:
+            prompt = build_prompt(source, source_lang, source_code, gender=gender)
+            try:
+                output = self._complete(
+                    prompt,
+                    source,
+                    source_code,
+                    0.0,
+                    quoted=True,
+                    gender=gender,
+                    history=(history or [])[-2:],
+                ).strip()
+            except (urllib.error.URLError, TimeoutError, ValueError, KeyError, json.JSONDecodeError):
+                return None
             if is_sane_translation(source, output):
                 return output.strip('"').strip()
         return None
