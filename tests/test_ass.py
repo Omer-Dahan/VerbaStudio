@@ -1,7 +1,46 @@
+import subprocess
 from pathlib import Path
 
 from hs.ass import format_timestamp, subtitle_geometry, write_ass
 from hs.models import Cue
+
+
+def render_black_frame_margins(
+    ass_path: Path, width: int, height: int
+) -> dict[str, int]:
+    fonts_dir = Path(__file__).resolve().parent.parent / "fonts"
+    ass_filter = f"ass=filename='{ass_path.resolve()}':fontsdir='{fonts_dir}'"
+    command = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c=black:s={width}x{height}:d=1:r=1",
+        "-vf",
+        ass_filter,
+        "-frames:v",
+        "1",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "gray",
+        "pipe:1",
+    ]
+    frame = subprocess.run(command, check=True, capture_output=True).stdout
+    assert len(frame) == width * height
+    visible = [index for index, value in enumerate(frame) if value]
+    assert visible, "ASS render did not contain any visible subtitle pixels"
+    xs = [index % width for index in visible]
+    ys = [index // width for index in visible]
+    return {
+        "left": min(xs),
+        "right": width - 1 - max(xs),
+        "top": min(ys),
+        "bottom": height - 1 - max(ys),
+    }
 
 
 def test_ass_uses_video_resolution_style_and_rtl_override(tmp_path: Path) -> None:
@@ -46,3 +85,13 @@ def test_vertical_frame_geometry_scales_font_and_line_budget() -> None:
 def test_font_size_is_clamped_for_extreme_frame_heights() -> None:
     assert subtitle_geometry(320, 480)[0] == 28
     assert subtitle_geometry(3840, 2160)[0] == 64
+
+
+def test_vertical_ass_has_clear_margins_on_black_frame(tmp_path: Path) -> None:
+    destination = tmp_path / "vertical.ass"
+    text = " ".join(["מילה"] * 8)
+    write_ass([Cue(0.0, 1.0, text, text)], destination, 576, 1024)
+
+    margins = render_black_frame_margins(destination, 576, 1024)
+
+    assert all(margin >= 24 for margin in margins.values()), margins
