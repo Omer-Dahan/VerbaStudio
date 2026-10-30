@@ -7,9 +7,11 @@ from hs.models import Cue
 
 DEFAULT_FONT = "Ploni DL 1.1 AAA"
 LATIN_RUN = re.compile(
-    r"[A-Za-z0-9](?:[A-Za-z0-9]|[.'\-&](?=[A-Za-z0-9])| (?=[A-Za-z0-9]))*"
+    r"(?=[A-Za-z0-9.,:%$+\-/& ]*[A-Za-z])"
+    r"[A-Za-z0-9](?:[A-Za-z0-9]|[.,:%$+\-/&](?=[A-Za-z0-9])| (?=[A-Za-z0-9]))*"
 )
-RLI = "\u2067"
+ASCII_QUOTES = str.maketrans("", "", "'\"`")
+LRI = "\u2066"
 PDI = "\u2069"
 RLM = "\u200f"
 
@@ -72,7 +74,7 @@ def format_timestamp(seconds: float) -> str:
 
 
 def _ass_text(text: str, max_chars: int) -> str:
-    safe = text.replace("\\", "＼").replace("{", "｛").replace("}", "｝")
+    safe = text.translate(ASCII_QUOTES).replace("\\", "＼").replace("{", "｛").replace("}", "｝")
     words = safe.replace("\n", " ").split()
     if len(safe) <= max_chars or len(words) < 2:
         return _bidi_line(safe)
@@ -87,5 +89,5 @@ def _ass_text(text: str, max_chars: int) -> str:
 
 
 def _bidi_line(text: str) -> str:
-    isolated = LATIN_RUN.sub(lambda match: f"{RLI}{match.group()}{PDI}", text)
+    isolated = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", text)
     return isolated + RLM

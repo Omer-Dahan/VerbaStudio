@@ -66,11 +66,11 @@ def test_ass_uses_video_resolution_style_and_rtl_override(tmp_path: Path) -> Non
     [
         (
             "הגרסה נקראת 'Horizon Minecraft Java 26.3'.",
-            "הגרסה נקראת '\u2067Horizon Minecraft Java 26.3\u2069'.\u200f",
+            "הגרסה נקראת \u2066Horizon Minecraft Java 26.3\u2069.\u200f",
         ),
-        ("Mojang's code.", "\u2067Mojang's code\u2069.\u200f"),
-        ("שוחרר ב-2026.", "שוחרר ב-\u20672026\u2069.\u200f"),
-        ("(GPU) ו-VRAM", "(\u2067GPU\u2069) ו-\u2067VRAM\u2069\u200f"),
+        ("Mojang's code.", "\u2066Mojangs code\u2069.\u200f"),
+        ("שוחרר ב-2026.", "שוחרר ב-2026.\u200f"),
+        ("(GPU) ו-VRAM", "(\u2066GPU\u2069) ו-\u2066VRAM\u2069\u200f"),
         ("עברית בלבד", "עברית בלבד\u200f"),
     ],
 )
@@ -78,6 +78,26 @@ def test_ass_text_isolates_latin_runs_and_marks_rtl_lines(
     text: str, expected: str
 ) -> None:
     assert _ass_text(text, max_chars=100) == expected
+
+
+def test_ass_text_uses_lri_only_for_latin_runs() -> None:
+    rendered = _ass_text(
+        "נקרא `Horizon Minecraft Java 26.3` ועוד 2026-10-30 שוב",
+        max_chars=100,
+    )
+
+    assert "\u2067" not in rendered
+    assert rendered == (
+        "נקרא \u2066Horizon Minecraft Java 26.3\u2069 ועוד 2026-10-30 שוב\u200f"
+    )
+    assert rendered.count("\u200f") == 1
+
+
+def test_ass_text_removes_ascii_quotes() -> None:
+    rendered = _ass_text("'יחיד' \"כפול\" `קוד`", max_chars=100)
+
+    assert not {"'", '"', "`"} & set(rendered)
+    assert rendered == "יחיד כפול קוד\u200f"
 
 
 def test_wrapped_ass_text_marks_both_lines_as_rtl() -> None:
