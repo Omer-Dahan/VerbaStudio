@@ -50,6 +50,11 @@ def build_report(cues: list[Cue], video_path: Path, duration: float) -> dict:
             for index, cue in enumerate(cues, 1)
             if characters_per_second(cue) > 17.0
         ],
+        "forced_cues": [
+            {"cue": index, "cps": round(characters_per_second(cue), 2)}
+            for index, cue in enumerate(cues, 1)
+            if cue.cps_forced
+        ],
         "translation_failures": [
             index for index, cue in enumerate(cues, 1) if cue.translation_failed
         ],
@@ -69,6 +74,7 @@ def write_report(report: dict, json_path: Path, markdown_path: Path) -> None:
         f"- Average duration: {report['average_duration']:.3f}s",
         f"- Under one second: {len(report['under_one_second'])}",
         f"- CPS violations: {len(report['cps_violations'])}",
+        f"- Forced cues: {len(report['forced_cues'])}",
         f"- Translation failures: {len(report['translation_failures'])}",
         f"- Low-confidence words: {len(report['low_confidence_words'])}",
         f"- Boundary issues: {len(report['boundary_issues'])}",
@@ -131,4 +137,3 @@ def parse_silences(output: str, duration: float) -> list[tuple[float, float]]:
     if open_start is not None:
         intervals.append((open_start, duration))
     return intervals
-

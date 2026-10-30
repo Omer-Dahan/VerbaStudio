@@ -56,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--force", action="store_true", help="Ignore cached transcription and translation")
     parser.add_argument("--srt-only", action="store_true", help="Write SRT and ASS files without burning")
     parser.add_argument("--progress", type=Path, help="Append stage updates as JSON lines")
+    parser.add_argument("--strict", action="store_true", help="Exit 7 when subtitle QA violations remain")
     return parser
 
 
@@ -177,7 +178,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     report = build_report(cues, video, float(metadata["duration"]))
     write_report(report, qa_json, qa_markdown)
 
-    if report["cps_violations"] or report.get("boundary_issues"):
+    if args.strict and (report["cps_violations"] or report.get("boundary_issues")):
         raise PipelineError("QA failed: subtitle timing or reading-speed violations remain", 7)
     _progress(args.progress, "qa")
 
@@ -186,8 +187,9 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     manifest["cue_count"] = len(cues)
     manifest["cps_max"] = round(max((characters_per_second(cue) for cue in cues), default=0.0), 2)
     manifest["qa"] = {
-        "cps_violations": len(report["cps_violations"]),
-        "silence_overlaps": len(report["silence_overlaps"]),
+        "cps_violations": report["cps_violations"],
+        "forced_cues": report["forced_cues"],
+        "silence_overlaps": report["silence_overlaps"],
         "translation_failures": len(report["translation_failures"]),
     }
     print(f"ASS: {ass_path}", file=sys.stderr)
@@ -239,7 +241,12 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
         "compute_type": args.compute_type,
         "cue_count": 0,
         "cps_max": 0.0,
-        "qa": {"cps_violations": 0, "silence_overlaps": 0, "translation_failures": 0},
+        "qa": {
+            "cps_violations": [],
+            "forced_cues": [],
+            "silence_overlaps": [],
+            "translation_failures": 0,
+        },
         "secs": {"asr": 0.0, "translate": 0.0, "burn": 0.0, "total": 0.0},
         "exit": 0,
     }
@@ -260,6 +267,7 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "glossary": glossary_hash,
         "font": args.font,
         "gender": args.gender,
+        "strict": args.strict,
     }
 
 

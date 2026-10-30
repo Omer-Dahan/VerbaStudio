@@ -67,6 +67,7 @@ def test_json_success_is_parseable_and_has_required_shape(
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     fake_report = {
         "cps_violations": [],
+        "forced_cues": [],
         "silence_overlaps": [],
         "translation_failures": [],
     }
@@ -160,10 +161,15 @@ def test_repeat_run_uses_cache_and_force_bypasses_it(
     word = Word(0, 2, "hello")
     report = {
         "cps_violations": [],
+        "forced_cues": [],
         "silence_overlaps": [],
         "translation_failures": [],
         "boundary_issues": [],
     }
+
+    def write_report_files(_report, json_path, markdown_path):
+        json_path.write_text("{}", encoding="utf-8")
+        markdown_path.write_text("qa", encoding="utf-8")
 
     def write_ass_file(_cues, path, *_args):
         path.write_text("ass", encoding="utf-8")
@@ -205,6 +211,7 @@ def test_srt_only_writes_subtitles_and_jsonl_progress(
     monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     report = {
         "cps_violations": [],
+        "forced_cues": [],
         "silence_overlaps": [],
         "translation_failures": [],
         "boundary_issues": [],
@@ -233,3 +240,37 @@ def test_srt_only_writes_subtitles_and_jsonl_progress(
     burn_mock.assert_not_called()
     stages = [json.loads(line)["stage"] for line in progress.read_text().splitlines()]
     assert stages == ["start", "probe", "asr", "translate", "qa", "done"]
+
+
+def test_qa_is_soft_by_default_and_strict_returns_seven(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.write_bytes(b"video")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    report = {
+        "cps_violations": [{"cue": 1, "cps": 21.0}],
+        "forced_cues": [{"cue": 1, "cps": 21.0}],
+        "silence_overlaps": [],
+        "translation_failures": [],
+        "boundary_issues": [],
+    }
+
+    def write_qa_files(_report, json_path, markdown_path):
+        json_path.write_text("{}", encoding="utf-8")
+        markdown_path.write_text("qa", encoding="utf-8")
+
+    with (
+        patch("hs.cli.probe_video", return_value={"width": 1920, "height": 1080, "duration": 2.0}),
+        patch("hs.cli.has_audio_stream", return_value=True),
+        patch("hs.cli.extract_audio"),
+        patch("hs.cli.transcribe", return_value=([Word(0, 2, "one two three")], "en")),
+        patch("hs.cli.TranslationClient.translate_cues"),
+        patch("hs.cli.build_report", return_value=report),
+        patch("hs.cli.write_report", side_effect=write_qa_files),
+        patch("hs.cli.burn_subtitles", return_value="test") as burn_mock,
+    ):
+        assert main([str(video), "--force"]) == 0
+        assert main([str(video), "--force", "--strict"]) == 7
+
+    burn_mock.assert_called_once()
