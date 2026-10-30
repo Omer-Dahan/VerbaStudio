@@ -260,7 +260,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         "cps_violations": report["cps_violations"],
         "forced_cues": report["forced_cues"],
         "silence_overlaps": report["silence_overlaps"],
-        "translation_failures": len(report["translation_failures"]),
+        "translation_failures": report["translation_failures"],
     }
     print(f"ASS: {ass_path}", file=sys.stderr)
     print(f"QA: {qa_json}", file=sys.stderr)
@@ -319,7 +319,7 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
             "cps_violations": [],
             "forced_cues": [],
             "silence_overlaps": [],
-            "translation_failures": 0,
+            "translation_failures": [],
         },
         "secs": {"asr": 0.0, "translate": 0.0, "burn": 0.0, "total": 0.0},
         "exit": 0,

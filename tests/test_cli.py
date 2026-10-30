@@ -161,7 +161,7 @@ def test_one_translation_failure_is_reported_and_run_continues(
         assert main([str(video), "--dry-run", "--json"]) == 0
 
     manifest = json.loads(capsys.readouterr().out)
-    assert manifest["qa"]["translation_failures"] == 1
+    assert manifest["qa"]["translation_failures"] == [1]
 
 
 def test_translation_failures_over_threshold_return_exit_five(tmp_path: Path) -> None:

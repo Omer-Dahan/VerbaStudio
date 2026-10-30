@@ -1,5 +1,10 @@
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+from threading import Thread
 from unittest.mock import Mock, patch
+
+import pytest
 
 from hs.models import Cue
 from hs.translate import (
@@ -73,6 +78,71 @@ def test_atomic_cues_pass_through_without_translation() -> None:
     assert [cue.text for cue in cues] == ["Minecraft", "26.3"]
     assert all(cue.translation_passthrough for cue in cues)
     assert not any(cue.translation_failed for cue in cues)
+    assert all(cue.translation_outcome == "passthrough" for cue in cues)
+
+
+def test_stub_server_retries_503_then_translates() -> None:
+    statuses = iter([503, 200])
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            status = next(statuses)
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            if status == 200:
+                body = {"choices": [{"message": {"content": "שלום לכולם"}}]}
+                self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        cue = Cue(0.0, 1.0, "Hello everyone")
+        client = TranslationClient(
+            f"http://127.0.0.1:{server.server_port}", sleep=lambda _delay: None
+        )
+        client.translate_cues([cue], "en")
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+    assert cue.text == "שלום לכולם"
+    assert cue.translation_outcome == "translated"
+    assert not cue.translation_failed
+    assert cue.translation_retried
+    assert cue.translation_attempts == 2
+
+
+def test_stub_server_503_forever_fails_with_url() -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(503)
+            self.end_headers()
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever)
+    thread.start()
+    base_url = f"http://127.0.0.1:{server.server_port}"
+    try:
+        cue = Cue(0.0, 1.0, "Hello everyone")
+        client = TranslationClient(base_url, sleep=lambda _delay: None)
+        with pytest.raises(RuntimeError, match=base_url):
+            client.translate_cues([cue], "en")
+    finally:
+        server.shutdown()
+        thread.join()
+        server.server_close()
+
+    assert cue.translation_outcome == "failed"
+    assert cue.translation_attempts == 10
 
 
 def test_mixed_sentence_is_translated() -> None:

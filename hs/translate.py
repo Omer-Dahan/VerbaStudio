@@ -1,6 +1,8 @@
 import json
 import math
+import random
 import re
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -31,6 +33,11 @@ GENDER_HINTS = {
     "m": "(The speaker is a man; use masculine forms.)",
     "f": "(The speaker is a woman; use feminine forms.)",
 }
+RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
+
+
+class PermanentTranslationError(RuntimeError):
+    pass
 
 
 class TranslationClient:
@@ -40,6 +47,8 @@ class TranslationClient:
         mode: str = "chat",
         timeout: float = 60.0,
         request: Callable[[str, dict, float], dict] | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+        jitter: Callable[[], float] = random.random,
     ) -> None:
         if mode not in {"chat", "completion", "api"}:
             raise ValueError(f"Unsupported translation mode: {mode}")
@@ -47,6 +56,10 @@ class TranslationClient:
         self.mode = mode
         self.timeout = timeout
         self._request_override = request
+        self._sleep = sleep
+        self._jitter = jitter
+        self._request_attempts = 0
+        self._transport_failures = 0
 
     def translate_cues(
         self,
@@ -59,11 +72,50 @@ class TranslationClient:
         if glossary_path:
             glossary.update(load_glossary(glossary_path))
         history = list(glossary.items())[-2:]
+        pending: list[Cue] = []
+        attempted = 0
+        transport_only_failures = 0
         for cue in cues:
             if should_passthrough(cue.source):
                 cue.text = cue.source
                 cue.translation_passthrough = True
+                cue.translation_outcome = "passthrough"
                 continue
+            attempted += 1
+            history, transport_only = self._translate_cue(
+                cue, source_code, gender, history, glossary
+            )
+            if cue.translation_failed:
+                pending.append(cue)
+                transport_only_failures += transport_only
+
+        for cue in pending:
+            cue.translation_failed = False
+            history, transport_only = self._translate_cue(
+                cue, source_code, gender, history, glossary
+            )
+            if not cue.translation_failed:
+                transport_only_failures -= 1
+            elif not transport_only:
+                transport_only_failures -= 1
+
+        if attempted and transport_only_failures == attempted:
+            raise RuntimeError(
+                f"Translation server {self.base_url} was unreachable for the full retry budget"
+            )
+        return cues
+
+    def _translate_cue(
+        self,
+        cue: Cue,
+        source_code: str,
+        gender: str | None,
+        history: list[tuple[str, str]],
+        glossary: dict[str, str],
+    ) -> tuple[list[tuple[str, str]], bool]:
+        self._request_attempts = 0
+        self._transport_failures = 0
+        try:
             translation = self.translate_text(
                 cue.source,
                 source_code,
@@ -71,14 +123,26 @@ class TranslationClient:
                 history=history,
                 glossary=glossary,
             )
-            if translation is None:
-                cue.text = cue.source
-                cue.translation_failed = True
-            else:
-                cue.text = apply_glossary(translation, glossary)
-                history.append((cue.source, cue.text))
-                history = history[-2:]
-        return cues
+        except PermanentTranslationError:
+            translation = None
+        except (urllib.error.URLError, TimeoutError, OSError):
+            translation = None
+        cue.translation_attempts += self._request_attempts
+        cue.translation_retried |= self._request_attempts > 1
+        transport_only = bool(self._request_attempts) and (
+            self._transport_failures == self._request_attempts
+        )
+        if translation is None:
+            cue.text = cue.source
+            cue.translation_failed = True
+            cue.translation_outcome = "failed"
+            return history, transport_only
+
+        cue.text = apply_glossary(translation, glossary)
+        cue.translation_failed = False
+        cue.translation_outcome = "translated"
+        history.append((cue.source, cue.text))
+        return history[-2:], False
 
     def translate_text(
         self,
@@ -102,7 +166,7 @@ class TranslationClient:
                 substituted, source_lang, source_code, quoted=quoted, gender=gender
             )
             try:
-                output = self._complete(
+                output = self._complete_with_retries(
                     prompt,
                     substituted,
                     source_code,
@@ -111,7 +175,9 @@ class TranslationClient:
                     gender=gender,
                     history=(history or [])[-2:],
                 ).strip()
-            except (urllib.error.URLError, TimeoutError, ValueError, KeyError, json.JSONDecodeError):
+            except PermanentTranslationError:
+                raise
+            except (ValueError, KeyError, json.JSONDecodeError):
                 continue
             if is_sane_translation(substituted, output) and all(
                 token.casefold() in output.casefold() for token in protected
@@ -120,7 +186,7 @@ class TranslationClient:
         if protected:
             prompt = build_prompt(source, source_lang, source_code, gender=gender)
             try:
-                output = self._complete(
+                output = self._complete_with_retries(
                     prompt,
                     source,
                     source_code,
@@ -129,11 +195,34 @@ class TranslationClient:
                     gender=gender,
                     history=(history or [])[-2:],
                 ).strip()
-            except (urllib.error.URLError, TimeoutError, ValueError, KeyError, json.JSONDecodeError):
+            except PermanentTranslationError:
+                raise
+            except (ValueError, KeyError, json.JSONDecodeError):
                 return None
             if is_sane_translation(source, output):
                 return output.strip('"').strip()
         return None
+
+    def _complete_with_retries(self, *args, **kwargs) -> str:
+        for attempt in range(5):
+            self._request_attempts += 1
+            try:
+                return self._complete(*args, **kwargs)
+            except urllib.error.HTTPError as error:
+                if 400 <= error.code < 500 and error.code != 429:
+                    raise PermanentTranslationError(
+                        f"Translation request was rejected with HTTP {error.code}"
+                    ) from error
+                self._transport_failures += 1
+                last_error = error
+            except (urllib.error.URLError, TimeoutError, OSError) as error:
+                self._transport_failures += 1
+                last_error = error
+            if attempt == 4:
+                raise last_error
+            delay = RETRY_DELAYS[attempt]
+            self._sleep(delay + self._jitter() * delay * 0.25)
+        raise AssertionError("unreachable")
 
     def _complete(
         self,
