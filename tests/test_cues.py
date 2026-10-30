@@ -72,6 +72,24 @@ def test_dense_cue_uses_backward_merge_by_default() -> None:
     assert merged[0].end == 2.5
 
 
+def test_over_budget_backward_merge_splits_combined_text() -> None:
+    cues = [
+        Cue(0.0, 2.0, "one two three four", "אחד שניים שלושה ארבעה"),
+        Cue(2.0, 2.3, "five six seven eight", "חמישה שישה שבעה שמונה"),
+    ]
+
+    split = enforce_reading_speed(cues, max_cps=17.0, max_chars=12)
+
+    assert len(split) > 1
+    assert " ".join(cue.source for cue in split) == "one two three four five six seven eight"
+    assert " ".join(cue.display_text for cue in split) == (
+        "אחד שניים שלושה ארבעה חמישה שישה שבעה שמונה"
+    )
+    assert split[0].start == 0.0
+    assert split[-1].end == 2.3
+    assert all(left.end == right.start for left, right in zip(split, split[1:]))
+
+
 def test_available_gaps_are_redistributed_to_remove_cps_violations() -> None:
     cues = [
         Cue(0.0, 1.0, "first", "א" * 20),

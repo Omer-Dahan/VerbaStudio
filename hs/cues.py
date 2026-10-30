@@ -22,11 +22,11 @@ def enforce_reading_speed(
     for cue in cues:
         if adjusted and _needs_more_time(cue, max_cps, min_cue_duration):
             candidate = _merge_pair(adjusted[-1], cue)
-            if (
-                candidate.end - candidate.start <= MAX_CUE_DURATION
-                and _fits_line_budget(candidate.display_text, max_chars)
-            ):
-                adjusted[-1] = candidate
+            if candidate.end - candidate.start <= MAX_CUE_DURATION:
+                if _fits_line_budget(candidate.display_text, max_chars):
+                    adjusted[-1] = candidate
+                else:
+                    adjusted[-1:] = _split_to_line_budget(candidate, max_chars)
                 continue
         if cue.end - cue.start < min_cue_duration:
             adjusted.append(cue)
@@ -59,6 +59,62 @@ def _fits_line_budget(text: str, max_chars: int, max_lines: int = 2) -> bool:
         else:
             line_length += separator + len(word)
     return lines <= max_lines
+
+
+def _split_to_line_budget(cue: Cue, max_chars: int) -> list[Cue]:
+    display_tokens = TOKEN.findall(cue.display_text)
+    if len(display_tokens) < 2:
+        return [cue]
+
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    for token in display_tokens:
+        candidate = [*current, token]
+        if current and not _fits_line_budget(" ".join(candidate), max_chars):
+            chunks.append(current)
+            current = [token]
+        else:
+            current = candidate
+    chunks.append(current)
+    if len(chunks) == 1:
+        return [cue]
+
+    source_tokens = cue.source.split()
+    duration = cue.end - cue.start
+    parts: list[Cue] = []
+    display_offset = 0
+    source_offset = 0
+    word_offset = 0
+    for index, chunk in enumerate(chunks):
+        display_end = display_offset + len(chunk)
+        end_ratio = display_end / len(display_tokens)
+        source_end = (
+            len(source_tokens)
+            if index == len(chunks) - 1
+            else max(source_offset + 1, round(len(source_tokens) * end_ratio))
+        )
+        word_end = (
+            len(cue.words)
+            if index == len(chunks) - 1
+            else max(word_offset, round(len(cue.words) * end_ratio))
+        )
+        start = cue.start + duration * (display_offset / len(display_tokens))
+        end = cue.start + duration * end_ratio
+        parts.append(
+            Cue(
+                start=start,
+                end=end,
+                source=" ".join(source_tokens[source_offset:source_end]),
+                text=" ".join(chunk),
+                words=cue.words[word_offset:word_end],
+                translation_failed=cue.translation_failed,
+                translation_passthrough=cue.translation_passthrough,
+            )
+        )
+        display_offset = display_end
+        source_offset = source_end
+        word_offset = word_end
+    return parts
 
 
 def characters_per_second(cue: Cue) -> float:
