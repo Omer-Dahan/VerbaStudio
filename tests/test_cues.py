@@ -90,6 +90,24 @@ def test_over_budget_backward_merge_splits_combined_text() -> None:
     assert all(left.end == right.start for left, right in zip(split, split[1:]))
 
 
+def test_backward_merge_only_concatenates_and_reduces_peak_cps() -> None:
+    cues = [
+        Cue(0.0, 2.8, "Wait—keep this punctuation.", "רגע—שמור את הפיסוק."),
+        Cue(2.8, 3.2, "Nothing disappears!", "שום דבר לא נעלם!"),
+    ]
+    original_peak = max(characters_per_second(cue) for cue in cues)
+
+    merged = enforce_reading_speed(cues, max_cps=19.0, max_chars=40)
+
+    assert [cue.source for cue in merged] == [
+        "Wait—keep this punctuation. Nothing disappears!"
+    ]
+    assert [cue.display_text for cue in merged] == [
+        "רגע—שמור את הפיסוק. שום דבר לא נעלם!"
+    ]
+    assert characters_per_second(merged[0]) < original_peak
+
+
 def test_available_gaps_are_redistributed_to_remove_cps_violations() -> None:
     cues = [
         Cue(0.0, 1.0, "first", "א" * 20),
