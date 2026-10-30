@@ -1,6 +1,11 @@
 import pytest
 
-from hs.cues import characters_per_second, enforce_reading_speed, normalize_cues
+from hs.cues import (
+    characters_per_second,
+    enforce_reading_speed,
+    normalize_cues,
+    word_sequence_is_complete,
+)
 from hs.models import Cue, Word
 
 
@@ -106,6 +111,33 @@ def test_backward_merge_only_concatenates_and_reduces_peak_cps() -> None:
         "רגע—שמור את הפיסוק. שום דבר לא נעלם!"
     ]
     assert characters_per_second(merged[0]) < original_peak
+
+
+def test_very_fast_speech_preserves_every_transcript_word_once() -> None:
+    words = [
+        Word(index * 0.08, index * 0.08 + 0.07, f"word{index}")
+        for index in range(24)
+    ]
+    cues = [
+        Cue(
+            words[index].start,
+            words[index + 3].end,
+            " ".join(word.text for word in words[index:index + 4]),
+            " ".join(f"תרגום{offset}" for offset in range(index, index + 4)),
+            words[index:index + 4],
+        )
+        for index in range(0, len(words), 4)
+    ]
+
+    normalized = enforce_reading_speed(
+        normalize_cues(cues, min_cue_duration=0.40),
+        max_cps=19.0,
+        min_cue_duration=0.40,
+        max_chars=18,
+    )
+
+    assert word_sequence_is_complete(normalized, words)
+    assert not word_sequence_is_complete(normalized, [*words, words[-1]])
 
 
 def test_available_gaps_are_redistributed_to_remove_cps_violations() -> None:

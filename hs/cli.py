@@ -17,6 +17,7 @@ from hs.cues import (
     characters_per_second,
     enforce_reading_speed,
     normalize_cues,
+    word_sequence_is_complete,
 )
 from hs.qa import build_report, write_report
 from hs.segment import segment_words
@@ -229,6 +230,9 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         min_cue_duration=args.min_cue_duration,
         max_chars=max_chars,
     )
+    manifest["no_word_loss"] = word_sequence_is_complete(cues, words)
+    if not manifest["no_word_loss"]:
+        raise PipelineError("Cue normalization lost or duplicated transcript words", 7)
     write_ass(
         cues,
         ass_path,
@@ -270,6 +274,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
                 "cue_count": manifest["cue_count"],
                 "cps_max": manifest["cps_max"],
                 "cps_target": manifest["cps_target"],
+                "no_word_loss": manifest["no_word_loss"],
                 "qa": manifest["qa"],
             },
             "transcript": " ".join(word.text for cue in cues for word in cue.words),
@@ -309,6 +314,7 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
         "cue_count": 0,
         "cps_max": 0.0,
         "cps_target": 17.0,
+        "no_word_loss": False,
         "qa": {
             "cps_violations": [],
             "forced_cues": [],

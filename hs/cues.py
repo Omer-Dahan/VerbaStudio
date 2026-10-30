@@ -128,6 +128,10 @@ def adaptive_cps_target(cues: list[Cue], duration: float) -> float:
     return min(24.0, max(17.0, source_cps * 1.05))
 
 
+def word_sequence_is_complete(cues: list[Cue], transcript: list[Word]) -> bool:
+    return [word for cue in cues for word in cue.words] == transcript
+
+
 def normalize_cues(cues: list[Cue], min_cue_duration: float = 0.40) -> list[Cue]:
     deduplicated: list[Cue] = []
     for cue in cues:

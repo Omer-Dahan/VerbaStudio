@@ -115,6 +115,7 @@ def test_json_success_is_parseable_and_has_required_shape(
     assert set(manifest) == {
         "ok", "out", "srt", "ass", "lang", "engine", "model", "compute_type",
         "cue_count", "cps_max", "cps_target", "qa", "secs", "exit",
+        "no_word_loss",
     }
 
 
