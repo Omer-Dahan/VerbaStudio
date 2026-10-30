@@ -1,7 +1,9 @@
 import subprocess
 from pathlib import Path
 
-from hs.ass import format_timestamp, subtitle_geometry, write_ass
+import pytest
+
+from hs.ass import _ass_text, format_timestamp, subtitle_geometry, write_ass
 from hs.models import Cue
 
 
@@ -55,7 +57,33 @@ def test_ass_uses_video_resolution_style_and_rtl_override(tmp_path: Path) -> Non
     assert "Style: Default,Ploni DL 1.1 AAA" in content
     assert ",2,40,40,77,1" in content
     assert "Dialogue: 0,0:00:01.23,0:00:04.57" in content
-    assert r"{\q2}שלום עולם" in content
+    assert "{\\q2}שלום עולם\u200f" in content
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "הגרסה נקראת 'Horizon Minecraft Java 26.3'.",
+            "הגרסה נקראת '\u2067Horizon Minecraft Java 26.3\u2069'.\u200f",
+        ),
+        ("Mojang's code.", "\u2067Mojang's code\u2069.\u200f"),
+        ("שוחרר ב-2026.", "שוחרר ב-\u20672026\u2069.\u200f"),
+        ("(GPU) ו-VRAM", "(\u2067GPU\u2069) ו-\u2067VRAM\u2069\u200f"),
+        ("עברית בלבד", "עברית בלבד\u200f"),
+    ],
+)
+def test_ass_text_isolates_latin_runs_and_marks_rtl_lines(
+    text: str, expected: str
+) -> None:
+    assert _ass_text(text, max_chars=100) == expected
+
+
+def test_wrapped_ass_text_marks_both_lines_as_rtl() -> None:
+    rendered = _ass_text("עברית אחת English words עברית שנייה", max_chars=18)
+
+    assert rendered.count(r"\N") == 1
+    assert all(line.endswith("\u200f") for line in rendered.split(r"\N"))
 
 
 def test_long_text_wraps_without_reordering_hebrew(tmp_path: Path) -> None:

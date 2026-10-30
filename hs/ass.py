@@ -1,10 +1,17 @@
 from pathlib import Path
 import math
+import re
 
 from hs.models import Cue
 
 
 DEFAULT_FONT = "Ploni DL 1.1 AAA"
+LATIN_RUN = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9]|[.'\-&](?=[A-Za-z0-9])| (?=[A-Za-z0-9]))*"
+)
+RLI = "\u2067"
+PDI = "\u2069"
+RLM = "\u200f"
 
 
 def subtitle_geometry(width: int, height: int) -> tuple[int, int, int]:
@@ -58,10 +65,17 @@ def _ass_text(text: str, max_chars: int) -> str:
     safe = text.replace("\\", "＼").replace("{", "｛").replace("}", "｝")
     words = safe.replace("\n", " ").split()
     if len(safe) <= max_chars or len(words) < 2:
-        return safe
+        return _bidi_line(safe)
 
     best_index = min(
         range(1, len(words)),
         key=lambda index: abs(len(" ".join(words[:index])) - len(" ".join(words[index:]))),
     )
-    return " ".join(words[:best_index]) + r"\N" + " ".join(words[best_index:])
+    return _bidi_line(" ".join(words[:best_index])) + r"\N" + _bidi_line(
+        " ".join(words[best_index:])
+    )
+
+
+def _bidi_line(text: str) -> str:
+    isolated = LATIN_RUN.sub(lambda match: f"{RLI}{match.group()}{PDI}", text)
+    return isolated + RLM
