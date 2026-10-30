@@ -44,18 +44,32 @@ def test_short_dense_cue_is_split_and_marked_when_still_too_fast() -> None:
     assert len(split[0].source.split()) >= 3
 
 
-def test_short_trailing_cue_merges_after_speed_splitting() -> None:
+def test_short_cue_is_absorbed_by_its_predecessor() -> None:
     cues = [
         Cue(0.0, 1.6, "a complete cue", "כתובית מלאה"),
-        Cue(1.7, 2.4, "short ending", "סוף קצר"),
+        Cue(1.7, 2.0, "short ending", "סוף קצר"),
     ]
 
     merged = enforce_reading_speed(cues)
 
     assert len(merged) == 1
     assert merged[0].start == 0.0
-    assert merged[0].end == 2.4
+    assert merged[0].end == 2.0
     assert merged[0].display_text == "כתובית מלאה סוף קצר"
+
+
+def test_dense_cue_uses_backward_merge_by_default() -> None:
+    cues = [
+        Cue(0.0, 2.0, "A complete thought.", "משפט שלם."),
+        Cue(2.0, 2.5, "Dense continuation!", "המשך צפוף מאוד!"),
+    ]
+
+    merged = enforce_reading_speed(cues, max_cps=17.0, max_chars=30)
+
+    assert len(merged) == 1
+    assert merged[0].source == "A complete thought. Dense continuation!"
+    assert merged[0].display_text == "משפט שלם. המשך צפוף מאוד!"
+    assert merged[0].end == 2.5
 
 
 def test_available_gaps_are_redistributed_to_remove_cps_violations() -> None:
@@ -66,8 +80,8 @@ def test_available_gaps_are_redistributed_to_remove_cps_violations() -> None:
 
     adjusted = enforce_reading_speed(cues, max_cps=10.0)
 
-    assert [(cue.start, cue.end) for cue in adjusted] == [(0.0, 2.0), (2.0, 4.0)]
-    assert all(characters_per_second(cue) <= 10.0 for cue in adjusted)
+    assert [(cue.start, cue.end) for cue in adjusted] == [(0.0, 4.0)]
+    assert characters_per_second(adjusted[0]) == pytest.approx(10.25)
 
 
 def test_cue_borrows_leading_silence_and_following_gap() -> None:

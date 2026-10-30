@@ -227,6 +227,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         normalize_cues(cues, min_cue_duration=args.min_cue_duration),
         max_cps=cps_target,
         min_cue_duration=args.min_cue_duration,
+        max_chars=max_chars,
     )
     write_ass(
         cues,

@@ -5,6 +5,7 @@ from hs.models import Cue, Word
 
 
 MIN_PIECE_DURATION = 0.8
+MAX_CUE_DURATION = 7.0
 TOKEN = re.compile(r'“[^”]*”|"[^"]*"|‘[^’]*’|\d+(?:[.,]\d+)+|\S+')
 SENTENCE_BOUNDARY = re.compile(r'[.!?;:]["”’)]?$')
 COMMA_BOUNDARY = re.compile(r'[,،]["”’)]?$')
@@ -12,17 +13,52 @@ LATIN_NAME = re.compile(r"[A-Z][A-Za-z0-9'’-]*$")
 
 
 def enforce_reading_speed(
-    cues: list[Cue], max_cps: float = 17.0, min_cue_duration: float = 0.40
+    cues: list[Cue],
+    max_cps: float = 17.0,
+    min_cue_duration: float = 0.40,
+    max_chars: int = 42,
 ) -> list[Cue]:
     adjusted: list[Cue] = []
     for cue in cues:
-        adjusted.extend(_split_until_readable(cue, max_cps))
-    merged = _merge_short_cues(adjusted)
-    retimed = _borrow_available_time(merged, max_cps)
+        if adjusted and _needs_more_time(cue, max_cps, min_cue_duration):
+            candidate = _merge_pair(adjusted[-1], cue)
+            if (
+                candidate.end - candidate.start <= MAX_CUE_DURATION
+                and _fits_line_budget(candidate.display_text, max_chars)
+            ):
+                adjusted[-1] = candidate
+                continue
+        if cue.end - cue.start < min_cue_duration:
+            adjusted.append(cue)
+        else:
+            adjusted.extend(_split_until_readable(cue, max_cps))
+    retimed = _borrow_available_time(adjusted, max_cps)
     return [
         replace(cue, cps_forced=characters_per_second(cue) > max_cps)
         for cue in retimed
     ]
+
+
+def _needs_more_time(cue: Cue, max_cps: float, min_cue_duration: float) -> bool:
+    return (
+        cue.end - cue.start < min_cue_duration
+        or characters_per_second(cue) > max_cps
+    )
+
+
+def _fits_line_budget(text: str, max_chars: int, max_lines: int = 2) -> bool:
+    lines = 1
+    line_length = 0
+    for word in text.replace("\n", " ").split():
+        if len(word) > max_chars:
+            return False
+        separator = 1 if line_length else 0
+        if line_length and line_length + separator + len(word) > max_chars:
+            lines += 1
+            line_length = len(word)
+        else:
+            line_length += separator + len(word)
+    return lines <= max_lines
 
 
 def characters_per_second(cue: Cue) -> float:
