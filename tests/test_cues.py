@@ -1,6 +1,6 @@
 import pytest
 
-from hs.cues import characters_per_second, enforce_reading_speed
+from hs.cues import characters_per_second, enforce_reading_speed, normalize_cues
 from hs.models import Cue, Word
 
 
@@ -26,12 +26,12 @@ def test_fast_cue_splits_on_real_word_boundary() -> None:
 
 
 def test_cue_without_word_metadata_uses_proportional_timing() -> None:
-    cue = Cue(0.0, 4.0, "one two three four", "א ב ג ד ה ו ז ח ט")
+    cue = Cue(0.0, 4.0, "one two three four five six", "א ב ג ד ה ו ז ח ט")
 
     parts = enforce_reading_speed([cue], max_cps=4.1)
 
-    assert [part.source for part in parts] == ["one two", "three", "four"]
-    assert [(part.start, part.end) for part in parts] == [(0.0, 2.0), (2.0, 3.0), (3.0, 4.0)]
+    assert [part.source for part in parts] == ["one two three", "four five six"]
+    assert [(part.start, part.end) for part in parts] == [(0.0, 2.0), (2.0, 4.0)]
 
 
 def test_short_dense_cue_is_split_and_marked_when_still_too_fast() -> None:
@@ -39,9 +39,9 @@ def test_short_dense_cue_is_split_and_marked_when_still_too_fast() -> None:
 
     split = enforce_reading_speed([cue], max_cps=4.0)
 
-    assert len(split) == 2
-    assert all(part.end - part.start >= 0.8 for part in split)
-    assert all(part.cps_forced for part in split)
+    assert len(split) == 1
+    assert split[0].cps_forced is True
+    assert len(split[0].source.split()) >= 3
 
 
 def test_short_trailing_cue_merges_after_speed_splitting() -> None:
@@ -98,3 +98,27 @@ def test_split_preserves_decimal_quote_and_latin_name_tokens() -> None:
     assert any("26.3" in text for text in text_parts)
     assert any("Product Name" in text for text in text_parts)
     assert all("26 .3" not in text for text in text_parts)
+
+
+def test_duplicate_translation_tail_is_removed_from_following_cue() -> None:
+    cues = [
+        Cue(0.0, 2.0, "one two three", "היום נצא לדרך."),
+        Cue(2.0, 4.0, "four five six", "היום נצא לדרך. ואז נמשיך"),
+    ]
+
+    normalized = normalize_cues(cues)
+
+    assert normalized[1].display_text == "ואז נמשיך"
+
+
+def test_source_cue_with_fewer_than_three_words_merges_into_neighbour() -> None:
+    cues = [
+        Cue(0.0, 0.7, "one two", "אחד שניים"),
+        Cue(0.8, 2.5, "three four five", "שלוש ארבע חמש"),
+    ]
+
+    normalized = normalize_cues(cues)
+
+    assert len(normalized) == 1
+    assert normalized[0].source == "one two three four five"
+    assert normalized[0].display_text == "אחד שניים שלוש ארבע חמש"

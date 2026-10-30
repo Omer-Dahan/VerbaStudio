@@ -12,7 +12,7 @@ from hs.ass import DEFAULT_FONT, write_ass
 from hs.audio import extract_audio, has_audio_stream, probe_video
 from hs.burn import burn_subtitles
 from hs.cache import cache_key, restore_cache, store_cache
-from hs.cues import characters_per_second, enforce_reading_speed
+from hs.cues import characters_per_second, enforce_reading_speed, normalize_cues
 from hs.qa import build_report, write_report
 from hs.segment import segment_words
 from hs.srt import write_srt
@@ -171,7 +171,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
             raise PipelineError("Translation failed after all retry attempts", 5)
     manifest["secs"]["translate"] = round(time.perf_counter() - translate_started, 3)
     _progress(args.progress, "translate")
-    cues = enforce_reading_speed(cues)
+    cues = enforce_reading_speed(normalize_cues(cues))
     write_ass(cues, ass_path, int(metadata["width"]), int(metadata["height"]), args.font)
     write_srt(cues, srt_path)
     report = build_report(cues, video, float(metadata["duration"]))

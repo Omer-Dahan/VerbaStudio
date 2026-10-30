@@ -28,6 +28,15 @@ def characters_per_second(cue: Cue) -> float:
     return len(cue.display_text.replace("\n", "")) / duration if duration > 0 else float("inf")
 
 
+def normalize_cues(cues: list[Cue]) -> list[Cue]:
+    deduplicated: list[Cue] = []
+    for cue in cues:
+        if deduplicated and cue.text:
+            cue = replace(cue, text=_strip_duplicate_tail(deduplicated[-1].display_text, cue.text))
+        deduplicated.append(cue)
+    return _merge_source_orphans(deduplicated)
+
+
 def _split_until_readable(cue: Cue, max_cps: float) -> list[Cue]:
     if characters_per_second(cue) <= max_cps:
         return [cue]
@@ -104,11 +113,60 @@ def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
 
 
 def _balanced_index(word_count: int, duration: float) -> int | None:
-    candidates = [index for index in range(1, word_count) if duration * index / word_count >= MIN_PIECE_DURATION and duration * (word_count - index) / word_count >= MIN_PIECE_DURATION]
+    candidates = [index for index in range(3, word_count - 2) if duration * index / word_count >= MIN_PIECE_DURATION and duration * (word_count - index) / word_count >= MIN_PIECE_DURATION]
     if not candidates:
         return None
     midpoint = word_count / 2
     return min(candidates, key=lambda index: abs(index - midpoint))
+
+
+def _strip_duplicate_tail(previous: str, current: str) -> str:
+    previous_words = previous.split()
+    current_words = current.split()
+    overlap = 0
+    limit = min(len(previous_words), len(current_words))
+    for length in range(3, limit + 1):
+        left = [_comparison_word(word) for word in previous_words[-length:]]
+        right = [_comparison_word(word) for word in current_words[:length]]
+        if left == right:
+            overlap = length
+    return " ".join(current_words[overlap:]).strip()
+
+
+def _comparison_word(word: str) -> str:
+    return word.casefold().strip('.,!?;:"“”‘’()[]')
+
+
+def _merge_source_orphans(cues: list[Cue]) -> list[Cue]:
+    merged: list[Cue] = []
+    pending: Cue | None = None
+    for cue in cues:
+        if len(cue.source.split()) >= 3:
+            if pending is not None:
+                cue = _merge_pair(pending, cue)
+                pending = None
+            merged.append(cue)
+        elif merged:
+            merged[-1] = _merge_pair(merged[-1], cue)
+        elif pending is None:
+            pending = cue
+        else:
+            pending = _merge_pair(pending, cue)
+    if pending is not None:
+        merged.append(pending)
+    return merged
+
+
+def _merge_pair(left: Cue, right: Cue) -> Cue:
+    return Cue(
+        start=left.start,
+        end=right.end,
+        source=f"{left.source} {right.source}".strip(),
+        text=f"{left.display_text} {right.display_text}".strip(),
+        words=[*left.words, *right.words],
+        translation_failed=left.translation_failed or right.translation_failed,
+        cps_forced=left.cps_forced or right.cps_forced,
+    )
 
 
 def _preferred_text_boundary(tokens: list[str], ratio: float) -> int:
