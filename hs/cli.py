@@ -87,6 +87,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=2.0,
         help="Outline width when --box-alpha is 0 (default: 2)",
     )
+    parser.add_argument(
+        "--position",
+        choices=("auto", "bottom", "top", "above"),
+        default="auto",
+        help="Vertical placement (default: auto)",
+    )
+    parser.add_argument(
+        "--margin-v",
+        type=_nonnegative_int,
+        help="Override the ASS vertical margin in pixels",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Write ASS and QA files without burning video")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable run manifest")
     parser.add_argument("--force", action="store_true", help="Ignore cached transcription and translation")
@@ -259,6 +270,8 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         args.box_alpha,
         args.outline,
         existing_captions["band"] if existing_captions["detected"] else None,
+        args.position,
+        args.margin_v,
     )
     write_srt(cues, srt_path)
     report = build_report(cues, video, float(metadata["duration"]), cps_target)
@@ -378,6 +391,8 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "size_scale": args.size_scale,
         "box_alpha": args.box_alpha,
         "outline": args.outline,
+        "position": args.position,
+        "margin_v": args.margin_v,
         "gender": args.gender,
         "strict": args.strict,
         "min_cue_duration": args.min_cue_duration,
@@ -415,6 +430,13 @@ def _unit_float(value: str) -> float:
 
 def _nonnegative_float(value: str) -> float:
     parsed = float(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be at least 0")
+    return parsed
+
+
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
     if parsed < 0:
         raise argparse.ArgumentTypeError("must be at least 0")
     return parsed

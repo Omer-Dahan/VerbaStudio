@@ -36,8 +36,12 @@ def write_ass(
     box_alpha: float = 0.55,
     outline: float = 2.0,
     caption_band: list[int] | None = None,
+    position: str = "auto",
+    margin_v_override: int | None = None,
 ) -> Path:
-    margin_v = subtitle_margin_v(height, caption_band)
+    alignment, margin_v = subtitle_layout(
+        height, caption_band, position, margin_v_override
+    )
     font_size, margin_h, max_chars = subtitle_geometry(width, height, size_scale)
     boxed = box_alpha > 0
     border_style = 3 if boxed else 1
@@ -52,7 +56,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{font_size},&H00FFFFFF,&H000000FF,&H00000000,{back_colour},0,0,0,0,100,100,0,0,{border_style},{style_outline:g},0,2,{margin_h},{margin_h},{margin_v},1
+Style: Default,{font},{font_size},&H00FFFFFF,&H000000FF,&H00000000,{back_colour},0,0,0,0,100,100,0,0,{border_style},{style_outline:g},0,{alignment},{margin_h},{margin_h},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -67,10 +71,23 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
 
 def subtitle_margin_v(height: int, caption_band: list[int] | None = None) -> int:
-    if not caption_band:
-        return round(height * 0.06)
-    subtitle_bottom_pct = max(8, caption_band[0] - 2)
-    return round(height * (100 - subtitle_bottom_pct) / 100)
+    return subtitle_layout(height, caption_band)[1]
+
+
+def subtitle_layout(
+    height: int,
+    caption_band: list[int] | None = None,
+    position: str = "auto",
+    margin_v_override: int | None = None,
+) -> tuple[int, int]:
+    if position == "top":
+        alignment, margin_v = 8, round(height * 0.08)
+    elif position in {"auto", "above"} and caption_band:
+        subtitle_bottom_pct = max(8, caption_band[0] - 2)
+        alignment, margin_v = 2, round(height * (100 - subtitle_bottom_pct) / 100)
+    else:
+        alignment, margin_v = 2, round(height * 0.06)
+    return alignment, margin_v if margin_v_override is None else margin_v_override
 
 
 def format_timestamp(seconds: float) -> str:
