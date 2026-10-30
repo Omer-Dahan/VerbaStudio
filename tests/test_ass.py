@@ -3,8 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from hs.ass import QUOTE_CHARACTERS, _ass_text, format_timestamp, subtitle_geometry, write_ass
+from hs.ass import _ass_text, format_timestamp, subtitle_geometry, write_ass
 from hs.models import Cue
+from hs.text import QUOTE_CHARACTERS
 
 
 def render_black_frame_margins(
@@ -116,6 +117,24 @@ def test_wrapped_ass_text_marks_both_lines_as_rtl() -> None:
 
     assert rendered.count(r"\N") == 1
     assert all(line.endswith("\u200f") for line in rendered.split(r"\N"))
+
+
+def test_ass_text_repairs_and_keeps_split_decimal_atomic() -> None:
+    rendered = _ass_text("ללא שינוי של 26'. .3, בנויה מחדש", max_chars=16)
+
+    assert "26.3" in rendered
+    assert "26\\N.3" not in rendered
+
+
+def test_oversized_token_stays_on_its_own_line() -> None:
+    token = "Horizon-Minecraft-Java-26.3"
+    rendered = _ass_text(f"לפני {token} אחרי", max_chars=10)
+
+    assert rendered.split(r"\N") == [
+        "לפני\u200f",
+        f"\u2066{token}\u2069\u200f",
+        "אחרי\u200f",
+    ]
 
 
 def test_long_text_wraps_without_reordering_hebrew(tmp_path: Path) -> None:

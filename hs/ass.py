@@ -3,6 +3,7 @@ import math
 import re
 
 from hs.models import Cue
+from hs.text import normalize_subtitle_text
 
 
 DEFAULT_FONT = "Ploni DL 1.1 AAA"
@@ -10,8 +11,6 @@ LATIN_RUN = re.compile(
     r"(?=[A-Za-z0-9.,:%$+\-/& ]*[A-Za-z])"
     r"[A-Za-z0-9](?:[A-Za-z0-9]|[.,:%$+\-/&](?=[A-Za-z0-9])| (?=[A-Za-z0-9]))*"
 )
-QUOTE_CHARACTERS = "'\"`´’‘“”"
-QUOTE_TRANSLATION = str.maketrans("", "", QUOTE_CHARACTERS)
 LRI = "\u2066"
 PDI = "\u2069"
 RLM = "\u200f"
@@ -75,18 +74,22 @@ def format_timestamp(seconds: float) -> str:
 
 
 def _ass_text(text: str, max_chars: int) -> str:
-    safe = text.translate(QUOTE_TRANSLATION).replace("\\", "＼").replace("{", "｛").replace("}", "｝")
-    words = safe.replace("\n", " ").split()
-    if len(safe) <= max_chars or len(words) < 2:
-        return _bidi_line(safe)
+    safe = normalize_subtitle_text(text).replace("\\", "＼").replace("{", "｛").replace("}", "｝")
+    tokens = safe.replace("\n", " ").split()
+    if not tokens:
+        return _bidi_line("")
 
-    best_index = min(
-        range(1, len(words)),
-        key=lambda index: abs(len(" ".join(words[:index])) - len(" ".join(words[index:]))),
-    )
-    return _bidi_line(" ".join(words[:best_index])) + r"\N" + _bidi_line(
-        " ".join(words[best_index:])
-    )
+    lines: list[str] = []
+    current = ""
+    for token in tokens:
+        candidate = f"{current} {token}".strip()
+        if current and len(candidate) > max_chars:
+            lines.append(current)
+            current = token
+        else:
+            current = candidate
+    lines.append(current)
+    return r"\N".join(_bidi_line(line) for line in lines)
 
 
 def _bidi_line(text: str) -> str:

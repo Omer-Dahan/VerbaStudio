@@ -165,7 +165,7 @@ def test_cue_borrows_leading_silence_and_following_gap() -> None:
     assert adjusted[0].cps_forced is False
 
 
-def test_split_preserves_decimal_quote_and_latin_name_tokens() -> None:
+def test_split_preserves_decimal_and_latin_name_tokens() -> None:
     cue = Cue(
         0.0,
         4.0,
@@ -176,10 +176,25 @@ def test_split_preserves_decimal_quote_and_latin_name_tokens() -> None:
     parts = enforce_reading_speed([cue], max_cps=12.0)
 
     text_parts = [part.display_text for part in parts]
-    assert any('"מחר בבוקר"' in text for text in text_parts)
+    assert any("מחר בבוקר" in text for text in text_parts)
+    assert all('"' not in text for text in text_parts)
     assert any("26.3" in text for text in text_parts)
     assert any("Product Name" in text for text in text_parts)
     assert all("26 .3" not in text for text in text_parts)
+
+
+def test_reading_speed_split_repairs_broken_numeric_token() -> None:
+    cue = Cue(
+        0.0,
+        4.0,
+        "one two three four five six",
+        "ללא שינוי של '26. .3', בנויה מחדש לגמרי עכשיו",
+    )
+
+    parts = enforce_reading_speed([cue], max_cps=8.0)
+
+    assert " ".join(part.display_text for part in parts).count("26.3") == 1
+    assert all("26." not in part.display_text or "26.3" in part.display_text for part in parts)
 
 
 def test_duplicate_translation_tail_is_removed_from_following_cue() -> None:
