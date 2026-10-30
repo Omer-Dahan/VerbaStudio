@@ -61,6 +61,7 @@ def build_report(
         "translation_failures": [
             index for index, cue in enumerate(cues, 1) if cue.translation_failed
         ],
+        "passthrough": sum(cue.translation_passthrough for cue in cues),
         "low_confidence_words": low_confidence,
         "boundary_issues": boundary_issues,
         "silences": [{"start": start, "end": end} for start, end in silences],
@@ -80,6 +81,7 @@ def write_report(report: dict, json_path: Path, markdown_path: Path) -> None:
         f"- CPS violations: {len(report['cps_violations'])}",
         f"- Forced cues: {len(report['forced_cues'])}",
         f"- Translation failures: {len(report['translation_failures'])}",
+        f"- Passthrough cues: {report['passthrough']}",
         f"- Low-confidence words: {len(report['low_confidence_words'])}",
         f"- Boundary issues: {len(report['boundary_issues'])}",
         f"- Silence overlaps: {len(report['silence_overlaps'])}",

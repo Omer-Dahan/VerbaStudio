@@ -89,6 +89,7 @@ def test_json_success_is_parseable_and_has_required_shape(
         "forced_cues": [],
         "silence_overlaps": [],
         "translation_failures": [],
+        "passthrough": 1,
     }
     with (
         patch("hs.cli.probe_video", return_value={"width": 1920, "height": 1080, "duration": 2.0}),
@@ -113,6 +114,7 @@ def test_json_success_is_parseable_and_has_required_shape(
 
     manifest = json.loads(capsys.readouterr().out)
     assert exit_code == 0
+    assert manifest["qa"]["passthrough"] == 1
     assert manifest["ok"] is True
     assert set(manifest) == {
         "ok", "out", "srt", "ass", "lang", "engine", "model", "compute_type",
@@ -161,7 +163,7 @@ def test_asr_model_is_released_before_translation_client_is_constructed(
         patch("hs.cli.TranslationClient", FakeTranslationClient),
         patch("hs.cli.build_report", return_value={
             "cps_violations": [], "forced_cues": [], "silence_overlaps": [],
-            "translation_failures": [], "boundary_issues": [],
+            "translation_failures": [], "passthrough": 0, "boundary_issues": [],
         }),
         patch(
             "hs.cli.write_report",
@@ -205,7 +207,7 @@ def test_one_translation_failure_is_reported_and_run_continues(
         patch("hs.cli.TranslationClient.translate_cues", side_effect=fail_translation),
         patch("hs.cli.build_report", return_value={
             "cps_violations": [], "forced_cues": [], "silence_overlaps": [],
-            "translation_failures": [1], "boundary_issues": [],
+            "translation_failures": [1], "passthrough": 0, "boundary_issues": [],
         }),
         patch(
             "hs.cli.write_report",
@@ -292,6 +294,7 @@ def test_repeat_run_uses_cache_and_force_bypasses_it(
         "forced_cues": [],
         "silence_overlaps": [],
         "translation_failures": [],
+        "passthrough": 0,
         "boundary_issues": [],
     }
 
@@ -342,6 +345,7 @@ def test_srt_only_writes_subtitles_and_jsonl_progress(
         "forced_cues": [],
         "silence_overlaps": [],
         "translation_failures": [],
+        "passthrough": 0,
         "boundary_issues": [],
     }
 
@@ -381,6 +385,7 @@ def test_qa_is_soft_by_default_and_strict_returns_seven(
         "forced_cues": [{"cue": 1, "cps": 21.0}],
         "silence_overlaps": [],
         "translation_failures": [],
+        "passthrough": 0,
         "boundary_issues": [],
     }
 

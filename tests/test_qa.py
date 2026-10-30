@@ -35,6 +35,17 @@ def test_report_lists_forced_cues(tmp_path, monkeypatch) -> None:
     assert report["forced_cues"] == [{"cue": 1, "cps": 9.0}]
 
 
+def test_report_separates_failures_from_passthrough_cues(tmp_path, monkeypatch) -> None:
+    failed = Cue(0.0, 1.0, "Real words", translation_failed=True)
+    name = Cue(1.0, 2.0, "Minecraft", translation_passthrough=True)
+    monkeypatch.setattr("hs.qa.detect_silences", lambda *_args: [])
+
+    report = build_report([failed, name], tmp_path / "video.mp4", 2.0)
+
+    assert report["translation_failures"] == [1]
+    assert report["passthrough"] == 1
+
+
 def test_adaptive_cps_target_stays_at_floor_for_normal_speech() -> None:
     cues = [Cue(0.0, 2.0, "A normal sentence")]
 
