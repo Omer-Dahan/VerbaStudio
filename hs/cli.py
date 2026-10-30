@@ -12,6 +12,7 @@ from hs.ass import DEFAULT_FONT, subtitle_geometry, write_ass
 from hs.audio import extract_audio, has_audio_stream, probe_video
 from hs.burn import burn_subtitles, encoding_decisions
 from hs.cache import cache_key, restore_cache, store_cache
+from hs.captions import detect_existing_captions
 from hs.cues import (
     adaptive_cps_target,
     characters_per_second,
@@ -181,6 +182,13 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         raise PipelineError(f"Cannot read input video: {error}", 2) from error
     _progress(args.progress, "probe")
+    existing_captions = detect_existing_captions(
+        video,
+        int(metadata["width"]),
+        int(metadata["height"]),
+        float(metadata["duration"]),
+    )
+    manifest["existing_captions"] = existing_captions
 
     asr_started = time.perf_counter()
     try:
@@ -290,6 +298,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
                 "qa": manifest["qa"],
                 "downscaled": manifest["downscaled"],
                 "quality_floor_hit": manifest["quality_floor_hit"],
+                "existing_captions": manifest["existing_captions"],
             },
             "transcript": " ".join(word.text for cue in cues for word in cue.words),
             "cue_source": " ".join(cue.source for cue in cues),
@@ -337,6 +346,7 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
         "size_mb": None,
         "downscaled": False,
         "quality_floor_hit": False,
+        "existing_captions": {"detected": False, "band": []},
         "qa": {
             "cps_violations": [],
             "forced_cues": [],
