@@ -27,7 +27,7 @@ def extract_audio(video_path: Path, wav_path: Path) -> Path:
     return wav_path
 
 
-def probe_video(video_path: Path) -> dict[str, float | int]:
+def probe_video(video_path: Path) -> dict[str, float | int | str]:
     command = [
         "ffprobe",
         "-v",
@@ -35,7 +35,7 @@ def probe_video(video_path: Path) -> dict[str, float | int]:
         "-select_streams",
         "v:0",
         "-show_entries",
-        "stream=width,height:format=duration",
+        "stream=width,height:format=duration:format_tags=hebsub,hebsub_font",
         "-of",
         "json",
         str(video_path),
@@ -46,10 +46,13 @@ def probe_video(video_path: Path) -> dict[str, float | int]:
         raise ValueError(f"No video stream found in {video_path}")
 
     stream = payload["streams"][0]
+    tags = payload["format"].get("tags", {})
     return {
         "width": int(stream["width"]),
         "height": int(stream["height"]),
         "duration": float(payload["format"]["duration"]),
+        "hebsub": tags.get("hebsub", ""),
+        "hebsub_font": tags.get("hebsub_font", ""),
     }
 
 

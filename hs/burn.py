@@ -42,6 +42,7 @@ def burn_subtitles(
     output_path: Path,
     duration_s: float,
     max_size_mb: float = 9.0,
+    font: str = "",
 ) -> BurnResult:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     audio_options = _audio_options(video_path)
@@ -73,6 +74,10 @@ def burn_subtitles(
         ",".join(filters),
         "-pix_fmt",
         "yuv420p",
+        "-metadata",
+        "hebsub=1",
+        "-metadata",
+        f"hebsub_font={font}",
     ]
     try:
         subprocess.run(
@@ -148,7 +153,7 @@ def _nvenc_command(
         *video_options,
         *audio,
         "-movflags",
-        "+faststart",
+        "+faststart+use_metadata_tags",
         str(output_path),
     ]
 
@@ -177,7 +182,7 @@ def _software_command(
         "medium",
         *audio,
         "-movflags",
-        "+faststart",
+        "+faststart+use_metadata_tags",
         str(output_path),
     ]
 

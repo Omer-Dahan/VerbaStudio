@@ -21,7 +21,13 @@ def test_extract_audio_uses_required_pcm_format(tmp_path: Path) -> None:
 def test_probe_video_returns_dimensions_and_duration() -> None:
     response = Mock(
         stdout=json.dumps(
-            {"streams": [{"width": 720, "height": 1280}], "format": {"duration": "87.2"}}
+            {
+                "streams": [{"width": 720, "height": 1280}],
+                "format": {
+                    "duration": "87.2",
+                    "tags": {"hebsub": "1", "hebsub_font": "Assistant"},
+                },
+            }
         )
     )
     with patch("hs.audio.subprocess.run", return_value=response):
@@ -29,6 +35,8 @@ def test_probe_video_returns_dimensions_and_duration() -> None:
             "width": 720,
             "height": 1280,
             "duration": 87.2,
+            "hebsub": "1",
+            "hebsub_font": "Assistant",
         }
 
 

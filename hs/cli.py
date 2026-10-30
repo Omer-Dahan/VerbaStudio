@@ -32,6 +32,9 @@ from hs.translate import (
 )
 
 
+ALREADY_SUBTITLED_MESSAGE = "This video was already subtitled by hebrew-subtitles; pass the original"
+
+
 class PipelineError(RuntimeError):
     def __init__(self, message: str, exit_code: int) -> None:
         super().__init__(message)
@@ -163,6 +166,14 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         "qa.json": qa_json,
         "qa.md": qa_markdown,
     }
+    try:
+        metadata = probe_video(video)
+        if metadata.get("hebsub") == "1" or _matches_known_output(video):
+            raise PipelineError(ALREADY_SUBTITLED_MESSAGE, 2)
+    except PipelineError:
+        raise
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        raise PipelineError(f"Cannot read input video: {error}", 2) from error
     if not args.force:
         cached = restore_cache(cache_dir, cache_artifacts)
         if cached is not None and (args.dry_run or args.srt_only or output.is_file()):
@@ -185,7 +196,6 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
             return 0
 
     try:
-        metadata = probe_video(video)
         if not has_audio_stream(video):
             raise PipelineError(f"No audio stream found in {video}", 3)
     except PipelineError:
@@ -351,7 +361,12 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     burn_started = time.perf_counter()
     try:
         burn_result = burn_subtitles(
-            video, ass_path, output, float(metadata["duration"]), args.max_size_mb
+            video,
+            ass_path,
+            output,
+            float(metadata["duration"]),
+            args.max_size_mb,
+            args.font,
         )
     except (OSError, subprocess.CalledProcessError) as error:
         raise PipelineError(f"Burn failed: {error}", 6) from error
@@ -366,6 +381,41 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     print(f"Video: {output} ({burn_result.codec})", file=sys.stderr)
     _progress(args.progress, "done")
     return 0
+
+
+def _matches_known_output(video: Path) -> bool:
+    """Recognize untagged outputs produced before the hebsub MP4 tag existed."""
+    cache_root = Path.home() / ".cache" / "hebrew-subs"
+    if not cache_root.is_dir():
+        return False
+
+    size = video.stat().st_size
+    digest: str | None = None
+    for run_path in cache_root.glob("*/run.json"):
+        try:
+            payload = json.loads(run_path.read_text(encoding="utf-8"))
+            ass_path = Path(payload.get("manifest", {}).get("ass", ""))
+        except (OSError, json.JSONDecodeError, TypeError):
+            continue
+        output = ass_path.with_suffix(".mp4")
+        try:
+            if output.resolve() == video or output.stat().st_size != size:
+                continue
+        except OSError:
+            continue
+        if digest is None:
+            digest = _file_digest(video)
+        if _file_digest(output) == digest:
+            return True
+    return False
+
+
+def _file_digest(path: Path) -> bytes:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.digest()
 
 
 def _empty_manifest(args: argparse.Namespace) -> dict:

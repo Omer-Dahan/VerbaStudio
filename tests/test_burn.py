@@ -31,7 +31,8 @@ def test_burn_prefers_nvenc_and_targets_size_budget() -> None:
     assert command[command.index("-c:a") + 1] == "aac"
     assert command[command.index("-b:v") + 1] == "1751k"
     assert command[command.index("-pix_fmt") + 1] == "yuv420p"
-    assert "+faststart" in command
+    assert "+faststart+use_metadata_tags" in command
+    assert command[command.index("-metadata") + 1] == "hebsub=1"
 
 
 def test_burn_falls_back_to_libx264() -> None:

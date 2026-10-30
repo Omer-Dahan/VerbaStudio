@@ -6,7 +6,14 @@ from unittest.mock import call, patch
 
 import pytest
 
-from hs.cli import build_parser, main, resolve_output_path, wait_for_translation_server
+from hs.cli import (
+    ALREADY_SUBTITLED_MESSAGE,
+    _matches_known_output,
+    build_parser,
+    main,
+    resolve_output_path,
+    wait_for_translation_server,
+)
 from hs.burn import BurnResult
 from hs.models import Cue, Word
 
@@ -76,6 +83,50 @@ def test_json_failure_is_parseable_and_human_error_uses_stderr(
     assert manifest["out"] is None
     assert manifest["exit"] == 2
     assert "Video not found" in captured.err
+
+
+def test_tagged_input_is_rejected_before_asr(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = tmp_path / "rendered.mp4"
+    video.touch()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    with (
+        patch(
+            "hs.cli.probe_video",
+            return_value={
+                "width": 1920,
+                "height": 1080,
+                "duration": 2.0,
+                "hebsub": "1",
+            },
+        ),
+        patch("hs.cli.transcribe") as transcribe_mock,
+    ):
+        assert main([str(video), "--force"]) == 2
+
+    assert capsys.readouterr().err.strip() == f"Error: {ALREADY_SUBTITLED_MESSAGE}"
+    transcribe_mock.assert_not_called()
+
+
+def test_legacy_output_is_recognized_from_cached_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    cache = home / ".cache/hebrew-subs/run"
+    cache.mkdir(parents=True)
+    rendered = tmp_path / "rendered.mp4"
+    rendered.write_bytes(b"previous hebsub output")
+    ass = rendered.with_suffix(".ass")
+    ass.touch()
+    (cache / "run.json").write_text(
+        json.dumps({"manifest": {"ass": str(ass)}}), encoding="utf-8"
+    )
+    copy = tmp_path / "renamed.mp4"
+    copy.write_bytes(rendered.read_bytes())
+    monkeypatch.setattr(Path, "home", lambda: home)
+
+    assert _matches_known_output(copy) is True
 
 
 def test_json_success_is_parseable_and_has_required_shape(
@@ -312,7 +363,7 @@ def test_repeat_run_uses_cache_and_force_bypasses_it(
         json_path.write_text("{}", encoding="utf-8")
         markdown_path.write_text("qa", encoding="utf-8")
 
-    def burn_file(_video, _ass, path, _duration, _max_size):
+    def burn_file(_video, _ass, path, _duration, _max_size, _font):
         path.write_bytes(b"rendered")
         return BurnResult("test", False, False)
 
@@ -396,7 +447,7 @@ def test_qa_is_soft_by_default_and_strict_returns_seven(
         json_path.write_text("{}", encoding="utf-8")
         markdown_path.write_text("qa", encoding="utf-8")
 
-    def burn_file(_video, _ass, output, _duration, _max_size):
+    def burn_file(_video, _ass, output, _duration, _max_size, _font):
         output.write_bytes(b"rendered")
         return BurnResult("test", False, False)
 
