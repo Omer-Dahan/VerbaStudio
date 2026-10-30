@@ -6,6 +6,8 @@ from hs.models import Cue, Word
 SENTENCE_END = re.compile(r"[.?!:׃][\"'”’)]*$")
 COMMA_END = re.compile(r"[,;،][\"'”’)]*$")
 TERMINAL_PUNCTUATION = re.compile(r"[.!?][\"'”’)]*$")
+LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
+URL = re.compile(r"(?:https?://|www\.)\S+$", re.IGNORECASE)
 ENGLISH_VERB = re.compile(
     r"^(?:am|are|be|been|being|can|could|did|do|does|had|has|have|is|may|might|"
     r"must|shall|should|was|were|will|would|\w+(?:ed|ing))$",
@@ -87,7 +89,11 @@ def _merge_short_groups(
 ) -> list[list[Word]]:
     merged: list[list[Word]] = []
     for group in groups:
-        if merged and group[-1].end - group[0].start < min_duration:
+        if (
+            merged
+            and group[-1].end - group[0].start < min_duration
+            and not _is_bare_passthrough(_join_words(group))
+        ):
             candidate = [*merged[-1], *group]
             gap = group[0].start - merged[-1][-1].end
             if (
@@ -99,7 +105,11 @@ def _merge_short_groups(
                 continue
         merged.append(group)
 
-    if len(merged) > 1 and merged[0][-1].end - merged[0][0].start < min_duration:
+    if (
+        len(merged) > 1
+        and merged[0][-1].end - merged[0][0].start < min_duration
+        and not _is_bare_passthrough(_join_words(merged[0]))
+    ):
         candidate = [*merged[0], *merged[1]]
         if (
             merged[1][0].start - merged[0][-1].end < merge_gap
@@ -179,6 +189,8 @@ def _groups_can_merge(
 def _is_sentence_fragment(words: list[Word]) -> bool:
     text = _join_words(words)
     source_words = text.split()
+    if _is_bare_passthrough(text):
+        return False
     first_letter = next((character for character in text if character.isalpha()), "")
     starts_lowercase = bool(first_letter and first_letter.islower())
     has_verb = (
@@ -190,7 +202,16 @@ def _is_sentence_fragment(words: list[Word]) -> bool:
     return (
         starts_lowercase
         or TERMINAL_PUNCTUATION.search(text) is None
-        or (len(source_words) < 4 and not has_verb)
+        or len(source_words) < 5
+    )
+
+
+def _is_bare_passthrough(text: str) -> bool:
+    cleaned = text.strip()
+    return (
+        not LETTER.search(cleaned)
+        or URL.fullmatch(cleaned) is not None
+        or len(cleaned.split()) == 1
     )
 
 

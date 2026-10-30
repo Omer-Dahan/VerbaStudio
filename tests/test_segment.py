@@ -15,10 +15,9 @@ def test_sentence_punctuation_creates_word_aligned_boundary() -> None:
     words = make_words(["This", "is", "one.", "This", "is", "two."])
     cues = segment_words(words)
 
-    assert [cue.source for cue in cues] == ["This is one.", "This is two."]
+    assert [cue.source for cue in cues] == ["This is one. This is two."]
     assert cues[0].start == words[0].start
-    assert cues[0].end == words[2].end
-    assert cues[1].start == words[3].start
+    assert cues[0].end == words[-1].end
 
 
 def test_long_word_is_never_cut() -> None:
@@ -105,6 +104,30 @@ def test_lowercase_fragment_merges_with_preceding_sentence() -> None:
     assert [cue.source for cue in cues] == ["This ends. and this continues."]
 
 
+def test_lowercase_fragment_with_product_name_merges_with_previous_cue() -> None:
+    words = make_words(
+        ["They", "removed", "it.", "your", "old", "Java", "mods"], step=0.65
+    )
+
+    cues = segment_words(words)
+
+    assert [cue.source for cue in cues] == ["They removed it. your old Java mods"]
+
+
+def test_bare_name_remains_a_separate_cue() -> None:
+    words = make_words(
+        ["Install", "the", "game", "on", "your", "computer.", "Minecraft"],
+        step=0.65,
+    )
+
+    cues = segment_words(words)
+
+    assert [cue.source for cue in cues] == [
+        "Install the game on your computer.",
+        "Minecraft",
+    ]
+
+
 def test_short_clause_with_subject_and_verb_remains_separate() -> None:
     words = make_words(
         ["It", "works.", "Developers", "test", "every", "build."], step=0.65
@@ -112,10 +135,7 @@ def test_short_clause_with_subject_and_verb_remains_separate() -> None:
 
     cues = segment_words(words)
 
-    assert [cue.source for cue in cues] == [
-        "It works.",
-        "Developers test every build.",
-    ]
+    assert [cue.source for cue in cues] == ["It works. Developers test every build."]
 
 
 def test_merged_fragment_splits_at_word_boundary_to_fit_line_budget() -> None:
