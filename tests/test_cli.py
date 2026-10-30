@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 from unittest.mock import call, patch
 
 import pytest
@@ -117,6 +119,61 @@ def test_json_success_is_parseable_and_has_required_shape(
         "cue_count", "cps_max", "cps_target", "qa", "secs", "exit",
         "no_word_loss",
     }
+
+
+def test_asr_model_is_released_before_translation_client_is_constructed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.touch()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    released = False
+
+    class FakeWhisperModel:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def transcribe(self, *_args, **_kwargs):
+            segment = SimpleNamespace(
+                words=[SimpleNamespace(start=0, end=1, word="hello", probability=1.0)]
+            )
+            return [segment], SimpleNamespace(language="en")
+
+        def __del__(self):
+            nonlocal released
+            released = True
+
+    class FakeTranslationClient:
+        def __init__(self, *_args, **_kwargs):
+            assert released, "ASR model remained alive when translation started"
+
+        def translate_cues(self, *_args, **_kwargs):
+            pass
+
+    fake_torch = SimpleNamespace(cuda=SimpleNamespace(empty_cache=lambda: None))
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeWhisperModel))
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    with (
+        patch("hs.cli.probe_video", return_value={"width": 1, "height": 1, "duration": 2.0}),
+        patch("hs.cli.has_audio_stream", return_value=True),
+        patch("hs.cli.extract_audio", return_value=tmp_path / "audio.wav"),
+        patch("hs.cli.TranslationClient", FakeTranslationClient),
+        patch("hs.cli.build_report", return_value={
+            "cps_violations": [], "forced_cues": [], "silence_overlaps": [],
+            "translation_failures": [], "boundary_issues": [],
+        }),
+        patch(
+            "hs.cli.write_report",
+            side_effect=lambda _report, json_path, markdown_path: (
+                json_path.write_text("{}", encoding="utf-8"),
+                markdown_path.write_text("qa", encoding="utf-8"),
+            ),
+        ),
+    ):
+        assert main([str(video), "--dry-run", "--force"]) == 0
+
+    assert released is True
 
 
 def test_no_audio_stream_returns_exit_three(tmp_path: Path) -> None:

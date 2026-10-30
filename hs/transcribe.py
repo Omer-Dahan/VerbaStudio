@@ -1,3 +1,4 @@
+import gc
 from pathlib import Path
 from typing import Any
 
@@ -17,16 +18,26 @@ def transcribe(
     from faster_whisper import WhisperModel
 
     model = WhisperModel(model_name, device=device, compute_type=compute_type)
-    segments, info = model.transcribe(
-        str(audio_path),
-        language=language,
-        word_timestamps=True,
-        vad_filter=True,
-        beam_size=5,
-    )
-    words = [word for segment in segments for word in _segment_words(segment)]
-    detected_language = language or info.language
-    return words, detected_language
+    try:
+        segments, info = model.transcribe(
+            str(audio_path),
+            language=language,
+            word_timestamps=True,
+            vad_filter=True,
+            beam_size=5,
+        )
+        words = [word for segment in segments for word in _segment_words(segment)]
+        detected_language = language or info.language
+        return words, detected_language
+    finally:
+        del model
+        gc.collect()
+        try:
+            import torch
+        except ImportError:
+            pass
+        else:
+            torch.cuda.empty_cache()
 
 
 def _segment_words(segment: Any) -> list[Word]:
