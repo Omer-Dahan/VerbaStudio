@@ -21,7 +21,8 @@ def enforce_reading_speed(
 ) -> list[Cue]:
     adjusted: list[Cue] = []
     for cue in cues:
-        cue = replace(cue, text=normalize_subtitle_text(cue.text))
+        if cue.text is not None:
+            cue = replace(cue, text=normalize_subtitle_text(cue.text))
         if adjusted and _needs_more_time(cue, max_cps, min_cue_duration):
             candidate = _merge_pair(adjusted[-1], cue)
             if candidate.end - candidate.start <= MAX_CUE_DURATION:

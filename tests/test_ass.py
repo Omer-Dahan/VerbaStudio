@@ -1,3 +1,4 @@
+import re
 import subprocess
 from pathlib import Path
 
@@ -135,6 +136,29 @@ def test_oversized_token_stays_on_its_own_line() -> None:
         f"\u2066{token}\u2069\u200f",
         "אחרי\u200f",
     ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "ללא שינוי של '26.3', בנויה מחדש",
+        "הגרסה 26.3 נבנתה מחדש",
+        "המשחק ב-Horizon Minecraft Java 26.3'",
+    ],
+)
+def test_reported_numeric_bidi_regressions(text: str) -> None:
+    rendered = _ass_text(text, max_chars=18)
+    plain = rendered.replace("\u2066", "").replace("\u2069", "").replace("\u200f", "")
+
+    assert "26.3" in rendered
+    assert "26\\N.3" not in rendered
+    assert not set(QUOTE_CHARACTERS) & set(rendered)
+    assert "\u200e" not in rendered
+    assert rendered.count("\u200f") == rendered.count(r"\N") + 1
+    assert rendered.count("\u2066") == rendered.count("\u2069")
+    assert plain.count("26.3") == 1
+    for isolated in re.findall("\u2066(.*?)\u2069", rendered):
+        assert re.search(r"[A-Za-z]", isolated)
 
 
 def test_long_text_wraps_without_reordering_hebrew(tmp_path: Path) -> None:
