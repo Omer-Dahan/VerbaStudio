@@ -70,6 +70,37 @@ def test_failed_translation_preserves_source_and_marks_cue() -> None:
     assert cue.translation_failed
 
 
+def test_rejected_fragment_retries_with_neighbor_context() -> None:
+    responses = iter(
+        [
+            {"choices": [{"message": {"content": "your old Java mods"}}]},
+            {"choices": [{"message": {"content": "your old Java mods"}}]},
+            {"choices": [{"message": {"content": "your old Java mods"}}]},
+            {"choices": [{"message": {"content": "your old Java mods"}}]},
+            {"choices": [{"message": {"content": "הסרנו אותם אתמול"}}]},
+            {"choices": [{"message": {"content": "המודים הישנים שלכם ל-Java"}}]},
+        ]
+    )
+    calls = []
+
+    def request(_endpoint, payload, _timeout):
+        calls.append(payload)
+        return next(responses)
+
+    fragment = Cue(0.0, 1.0, "your old Java mods")
+    neighbor = Cue(1.0, 3.0, "We removed them yesterday.")
+
+    TranslationClient(request=request).translate_cues([fragment, neighbor], "en")
+
+    assert fragment.text == "המודים הישנים שלכם ל-Java"
+    assert fragment.translation_outcome == "translated"
+    assert not fragment.translation_failed
+    assert calls[-1]["messages"][:2] == [
+        {"role": "user", "content": "We removed them yesterday."},
+        {"role": "assistant", "content": "הסרנו אותם אתמול"},
+    ]
+
+
 def test_atomic_cues_pass_through_without_translation() -> None:
     request = Mock()
     cues = [Cue(0.0, 1.0, "Minecraft"), Cue(1.0, 2.0, "26.3")]

@@ -82,10 +82,10 @@ class TranslationClient:
         if glossary_path:
             glossary.update(load_glossary(glossary_path))
         history = list(glossary.items())[-2:]
-        pending: list[Cue] = []
+        pending: list[tuple[int, Cue]] = []
         attempted = 0
         transport_only_failures = 0
-        for cue in cues:
+        for index, cue in enumerate(cues):
             if should_passthrough(cue.source):
                 cue.text = cue.source
                 cue.translation_passthrough = True
@@ -96,13 +96,14 @@ class TranslationClient:
                 cue, source_code, gender, history, glossary
             )
             if cue.translation_failed:
-                pending.append(cue)
+                pending.append((index, cue))
                 transport_only_failures += transport_only
 
-        for cue in pending:
+        for index, cue in pending:
             cue.translation_failed = False
+            retry_history = self._neighbor_history(cues, index, history)
             history, transport_only = self._translate_cue(
-                cue, source_code, gender, history, glossary
+                cue, source_code, gender, retry_history, glossary
             )
             if not cue.translation_failed:
                 transport_only_failures -= 1
@@ -114,6 +115,19 @@ class TranslationClient:
                 f"Translation server {self.base_url} was unreachable for the full retry budget"
             )
         return cues
+
+    @staticmethod
+    def _neighbor_history(
+        cues: list[Cue],
+        index: int,
+        fallback: list[tuple[str, str]],
+    ) -> list[tuple[str, str]]:
+        for neighbor_index in (index - 1, index + 1):
+            if 0 <= neighbor_index < len(cues):
+                neighbor = cues[neighbor_index]
+                if neighbor.translation_outcome == "translated":
+                    return [(neighbor.source, neighbor.text)]
+        return fallback
 
     def _translate_cue(
         self,
