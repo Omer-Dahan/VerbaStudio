@@ -7,6 +7,7 @@ from unittest.mock import call, patch
 import pytest
 
 from hs.cli import build_parser, main, resolve_output_path, wait_for_translation_server
+from hs.burn import BurnResult
 from hs.models import Cue, Word
 
 
@@ -32,6 +33,7 @@ def test_defaults_fit_sixteen_gigabyte_gpu() -> None:
     assert args.box_alpha == 0.55
     assert args.outline == 2.0
     assert args.min_cue_duration == 0.40
+    assert args.max_size_mb == 9.0
     assert "fits 16GB" in " ".join(build_parser().format_help().split())
 
 
@@ -119,7 +121,7 @@ def test_json_success_is_parseable_and_has_required_shape(
     assert set(manifest) == {
         "ok", "out", "srt", "ass", "lang", "engine", "model", "compute_type",
         "cue_count", "cps_max", "cps_target", "qa", "secs", "exit",
-        "no_word_loss",
+        "no_word_loss", "size_mb", "downscaled", "quality_floor_hit",
     }
 
 
@@ -309,9 +311,9 @@ def test_repeat_run_uses_cache_and_force_bypasses_it(
         json_path.write_text("{}", encoding="utf-8")
         markdown_path.write_text("qa", encoding="utf-8")
 
-    def burn_file(_video, _ass, path):
+    def burn_file(_video, _ass, path, _duration, _max_size):
         path.write_bytes(b"rendered")
-        return "test"
+        return BurnResult("test", False, False)
 
     with (
         patch("hs.cli.probe_video", return_value={"width": 1, "height": 1, "duration": 2.0}),
@@ -393,6 +395,10 @@ def test_qa_is_soft_by_default_and_strict_returns_seven(
         json_path.write_text("{}", encoding="utf-8")
         markdown_path.write_text("qa", encoding="utf-8")
 
+    def burn_file(_video, _ass, output, _duration, _max_size):
+        output.write_bytes(b"rendered")
+        return BurnResult("test", False, False)
+
     with (
         patch("hs.cli.probe_video", return_value={"width": 1920, "height": 1080, "duration": 2.0}),
         patch("hs.cli.has_audio_stream", return_value=True),
@@ -401,7 +407,10 @@ def test_qa_is_soft_by_default_and_strict_returns_seven(
         patch("hs.cli.TranslationClient.translate_cues"),
         patch("hs.cli.build_report", return_value=report),
         patch("hs.cli.write_report", side_effect=write_qa_files),
-        patch("hs.cli.burn_subtitles", return_value="test") as burn_mock,
+            patch(
+                "hs.cli.burn_subtitles",
+                side_effect=burn_file,
+            ) as burn_mock,
     ):
         assert main([str(video), "--force"]) == 0
         assert main([str(video), "--force", "--strict"]) == 7
