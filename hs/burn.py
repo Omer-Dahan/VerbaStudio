@@ -28,7 +28,9 @@ class BurnResult:
 
 def encoding_decisions(
     duration_s: float, max_size_mb: float, has_audio: bool
-) -> tuple[int, bool, bool]:
+) -> tuple[int | None, bool, bool]:
+    if max_size_mb == 0:
+        return None, False, False
     audio_kbps = 96 if has_audio else 0
     video_kbps = int((max_size_mb * 8192 / duration_s - audio_kbps) * 0.95)
     return video_kbps, video_kbps < 700, video_kbps < 500
@@ -123,20 +125,27 @@ def _audio_options(video_path: Path) -> list[str]:
 
 
 def _nvenc_command(
-    common: list[str], audio: list[str], output_path: Path, video_kbps: int
+    common: list[str], audio: list[str], output_path: Path, video_kbps: int | None
 ) -> list[str]:
+    video_options = (
+        ["-cq", "21"]
+        if video_kbps is None
+        else [
+            "-b:v",
+            f"{video_kbps}k",
+            "-maxrate",
+            f"{int(video_kbps * 1.2)}k",
+            "-bufsize",
+            f"{video_kbps * 2}k",
+        ]
+    )
     return [
         *common,
         "-c:v",
         "h264_nvenc",
         "-preset",
         "p5",
-        "-b:v",
-        f"{video_kbps}k",
-        "-maxrate",
-        f"{int(video_kbps * 1.2)}k",
-        "-bufsize",
-        f"{video_kbps * 2}k",
+        *video_options,
         *audio,
         "-movflags",
         "+faststart",
@@ -145,18 +154,25 @@ def _nvenc_command(
 
 
 def _software_command(
-    common: list[str], audio: list[str], output_path: Path, video_kbps: int
+    common: list[str], audio: list[str], output_path: Path, video_kbps: int | None
 ) -> list[str]:
+    video_options = (
+        ["-crf", "20"]
+        if video_kbps is None
+        else [
+            "-b:v",
+            f"{video_kbps}k",
+            "-maxrate",
+            f"{int(video_kbps * 1.2)}k",
+            "-bufsize",
+            f"{video_kbps * 2}k",
+        ]
+    )
     return [
         *common,
         "-c:v",
         "libx264",
-        "-b:v",
-        f"{video_kbps}k",
-        "-maxrate",
-        f"{int(video_kbps * 1.2)}k",
-        "-bufsize",
-        f"{video_kbps * 2}k",
+        *video_options,
         "-preset",
         "medium",
         *audio,

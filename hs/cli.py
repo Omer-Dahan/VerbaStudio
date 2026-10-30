@@ -94,9 +94,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--strict", action="store_true", help="Exit 7 when subtitle QA violations remain")
     parser.add_argument(
         "--max-size-mb",
-        type=_positive_float,
+        type=_nonnegative_float,
         default=9.0,
-        help="Maximum output size in MB (default: 9.0)",
+        help="Maximum output size in MB; 0 uses constant quality (default: 9.0)",
     )
     parser.add_argument(
         "--min-cue-duration",
