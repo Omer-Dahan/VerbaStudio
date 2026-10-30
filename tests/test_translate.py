@@ -103,6 +103,12 @@ def test_sanity_checks_reject_echo_latin_sentence_and_repetition() -> None:
     assert not is_sane_translation("One two three four", "אחד שתיים אחד שתיים")
 
 
+def test_sanity_checks_allow_wider_ratio_and_source_latin_names() -> None:
+    assert is_sane_translation("Use Rust for this service", "השתמשו ב-Rust עבור השירות הזה בבקשה")
+    assert is_sane_translation("A longer source text", "טקסט קצר")
+    assert not is_sane_translation("Use this tool", "השתמשו ב-Rust")
+
+
 def test_glossary_is_deterministic_and_validated(tmp_path: Path) -> None:
     path = tmp_path / "glossary.yaml"
     path.write_text('"ניו יורק": "נ״י"\n"יורק": "יורק סיטי"\n', encoding="utf-8")

@@ -13,7 +13,7 @@ from hs.models import Cue
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8189"
 HEBREW = re.compile(r"[\u0590-\u05ff]")
-LATIN_SENTENCE = re.compile(r"\b[A-Za-z]+(?:[ ,'-]+[A-Za-z]+){3,}[.!?]")
+LATIN_RUN = re.compile(r"[A-Za-z][A-Za-z0-9.+#'’-]*")
 LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
 URL = re.compile(r"(?:https?://|www\.)\S+$", re.IGNORECASE)
 PROMPT_ECHOES = (
@@ -197,7 +197,7 @@ def is_sane_translation(source: str, translation: str) -> bool:
     if any(marker in cleaned.casefold() for marker in PROMPT_ECHOES):
         return False
     ratio = len(cleaned) / max(1, len(source.strip()))
-    if not 0.5 <= ratio <= 1.8 or LATIN_SENTENCE.search(cleaned):
+    if not 0.4 <= ratio <= 2.2 or _has_unexpected_latin(cleaned, source):
         return False
     return not _is_repeated(cleaned)
 
@@ -239,6 +239,14 @@ def _is_repeated(text: str) -> bool:
         return False
     midpoint = len(words) // 2
     return len(words) % 2 == 0 and words[:midpoint] == words[midpoint:]
+
+
+def _has_unexpected_latin(translation: str, source: str) -> bool:
+    source_runs = {match.group().casefold() for match in LATIN_RUN.finditer(source)}
+    return any(
+        match.group().casefold() not in source_runs
+        for match in LATIN_RUN.finditer(translation)
+    )
 
 
 def _post_json(endpoint: str, payload: dict, timeout: float) -> dict:
