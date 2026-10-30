@@ -258,6 +258,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         args.size_scale,
         args.box_alpha,
         args.outline,
+        existing_captions["band"] if existing_captions["detected"] else None,
     )
     write_srt(cues, srt_path)
     report = build_report(cues, video, float(metadata["duration"]), cps_target)

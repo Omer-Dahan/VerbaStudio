@@ -35,8 +35,9 @@ def write_ass(
     size_scale: float = 1.20,
     box_alpha: float = 0.55,
     outline: float = 2.0,
+    caption_band: list[int] | None = None,
 ) -> Path:
-    margin_v = round(height * 0.06)
+    margin_v = subtitle_margin_v(height, caption_band)
     font_size, margin_h, max_chars = subtitle_geometry(width, height, size_scale)
     boxed = box_alpha > 0
     border_style = 3 if boxed else 1
@@ -63,6 +64,13 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
     return destination
+
+
+def subtitle_margin_v(height: int, caption_band: list[int] | None = None) -> int:
+    if not caption_band:
+        return round(height * 0.06)
+    subtitle_bottom_pct = max(8, caption_band[0] - 2)
+    return round(height * (100 - subtitle_bottom_pct) / 100)
 
 
 def format_timestamp(seconds: float) -> str:
