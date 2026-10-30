@@ -34,6 +34,8 @@ GENDER_HINTS = {
     "f": "(The speaker is a woman; use feminine forms.)",
 }
 RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
+RELOAD_RECOVERY_SECONDS = 180.0
+HEALTH_POLL_SECONDS = 5.0
 
 
 class PermanentTranslationError(RuntimeError):
@@ -49,6 +51,9 @@ class TranslationClient:
         request: Callable[[str, dict, float], dict] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         jitter: Callable[[], float] = random.random,
+        monotonic: Callable[[], float] = time.monotonic,
+        recovery_seconds: float = RELOAD_RECOVERY_SECONDS,
+        health_check: Callable[[str], bool] | None = None,
     ) -> None:
         if mode not in {"chat", "completion", "api"}:
             raise ValueError(f"Unsupported translation mode: {mode}")
@@ -58,6 +63,10 @@ class TranslationClient:
         self._request_override = request
         self._sleep = sleep
         self._jitter = jitter
+        self._monotonic = monotonic
+        self._recovery_seconds = recovery_seconds
+        self._health_check = health_check or server_is_healthy
+        self._recovery_deadline: float | None = None
         self._request_attempts = 0
         self._transport_failures = 0
 
@@ -68,6 +77,7 @@ class TranslationClient:
         glossary_path: Path | None = None,
         gender: str | None = None,
     ) -> list[Cue]:
+        self._recovery_deadline = self._monotonic() + max(0.0, self._recovery_seconds)
         glossary = load_glossary(DEFAULT_GLOSSARY_PATH)
         if glossary_path:
             glossary.update(load_glossary(glossary_path))
@@ -204,25 +214,37 @@ class TranslationClient:
         return None
 
     def _complete_with_retries(self, *args, **kwargs) -> str:
-        for attempt in range(5):
-            self._request_attempts += 1
-            try:
-                return self._complete(*args, **kwargs)
-            except urllib.error.HTTPError as error:
-                if 400 <= error.code < 500 and error.code != 429:
-                    raise PermanentTranslationError(
-                        f"Translation request was rejected with HTTP {error.code}"
-                    ) from error
-                self._transport_failures += 1
-                last_error = error
-            except (urllib.error.URLError, TimeoutError, OSError) as error:
-                self._transport_failures += 1
-                last_error = error
-            if attempt == 4:
+        while True:
+            for attempt in range(5):
+                self._request_attempts += 1
+                try:
+                    return self._complete(*args, **kwargs)
+                except urllib.error.HTTPError as error:
+                    if 400 <= error.code < 500 and error.code != 429:
+                        raise PermanentTranslationError(
+                            f"Translation request was rejected with HTTP {error.code}"
+                        ) from error
+                    self._transport_failures += 1
+                    last_error = error
+                except (urllib.error.URLError, TimeoutError, OSError) as error:
+                    self._transport_failures += 1
+                    last_error = error
+                if attempt < 4:
+                    delay = RETRY_DELAYS[attempt]
+                    self._sleep(delay + self._jitter() * delay * 0.25)
+            if not self._wait_for_server_reload():
                 raise last_error
-            delay = RETRY_DELAYS[attempt]
-            self._sleep(delay + self._jitter() * delay * 0.25)
-        raise AssertionError("unreachable")
+
+    def _wait_for_server_reload(self) -> bool:
+        if self._recovery_deadline is None:
+            return False
+        while True:
+            remaining = self._recovery_deadline - self._monotonic()
+            if remaining <= 0:
+                return False
+            if self._health_check(self.base_url):
+                return True
+            self._sleep(min(HEALTH_POLL_SECONDS, remaining))
 
     def _complete(
         self,

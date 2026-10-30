@@ -1,7 +1,9 @@
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import socket
 from threading import Thread
+import time
 from unittest.mock import Mock, patch
 
 import pytest
@@ -133,7 +135,7 @@ def test_stub_server_503_forever_fails_with_url() -> None:
     base_url = f"http://127.0.0.1:{server.server_port}"
     try:
         cue = Cue(0.0, 1.0, "Hello everyone")
-        client = TranslationClient(base_url, sleep=lambda _delay: None)
+        client = TranslationClient(base_url, sleep=lambda _delay: None, recovery_seconds=0)
         with pytest.raises(RuntimeError, match=base_url):
             client.translate_cues([cue], "en")
     finally:
@@ -143,6 +145,53 @@ def test_stub_server_503_forever_fails_with_url() -> None:
 
     assert cue.translation_outcome == "failed"
     assert cue.translation_attempts == 10
+
+
+def test_translation_survives_server_reload_after_three_seconds() -> None:
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        port = reservation.getsockname()[1]
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+
+        def do_POST(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            body = {"choices": [{"message": {"content": "שלום לכולם"}}]}
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_args):
+            pass
+
+    server: ThreadingHTTPServer | None = None
+
+    def start_after_reload() -> None:
+        nonlocal server
+        time.sleep(3.0)
+        server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        server.serve_forever()
+
+    thread = Thread(target=start_after_reload)
+    thread.start()
+    try:
+        cue = Cue(0.0, 1.0, "Hello everyone")
+        client = TranslationClient(
+            f"http://127.0.0.1:{port}", jitter=lambda: 0.0, recovery_seconds=10.0
+        )
+        translated = client.translate_cues([cue], "en")
+    finally:
+        if server is not None:
+            server.shutdown()
+        thread.join()
+        if server is not None:
+            server.server_close()
+
+    assert translated[0].text == "שלום לכולם"
+    assert translated[0].translation_failed is False
 
 
 def test_mixed_sentence_is_translated() -> None:
