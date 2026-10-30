@@ -93,6 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--progress", type=Path, help="Append stage updates as JSON lines")
     parser.add_argument("--strict", action="store_true", help="Exit 7 when subtitle QA violations remain")
     parser.add_argument(
+        "--max-size-mb",
+        type=_positive_float,
+        default=9.0,
+        help="Maximum output size in MB (default: 9.0)",
+    )
+    parser.add_argument(
         "--min-cue-duration",
         type=_positive_float,
         default=0.40,
@@ -150,6 +156,8 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         if cached is not None and (args.dry_run or args.srt_only or output.is_file()):
             manifest.update(cached["manifest"])
             manifest["out"] = None if args.dry_run or args.srt_only else str(output)
+            if manifest["out"]:
+                manifest["size_mb"] = round(output.stat().st_size / 1024**2, 3)
             manifest["srt"] = str(srt_path)
             manifest["ok"] = True
             manifest["exit"] = 0
@@ -289,12 +297,15 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         return 0
     burn_started = time.perf_counter()
     try:
-        codec = burn_subtitles(video, ass_path, output)
+        codec = burn_subtitles(
+            video, ass_path, output, float(metadata["duration"]), args.max_size_mb
+        )
     except (OSError, subprocess.CalledProcessError) as error:
         raise PipelineError(f"Burn failed: {error}", 6) from error
     manifest["secs"]["burn"] = round(time.perf_counter() - burn_started, 3)
     _progress(args.progress, "burn")
     manifest["out"] = str(output)
+    manifest["size_mb"] = round(output.stat().st_size / 1024**2, 3)
     manifest["ok"] = True
     manifest["secs"]["total"] = round(time.perf_counter() - started, 3)
     print(f"Video: {output} ({codec})", file=sys.stderr)
@@ -316,6 +327,7 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
         "cps_max": 0.0,
         "cps_target": 17.0,
         "no_word_loss": False,
+        "size_mb": None,
         "qa": {
             "cps_violations": [],
             "forced_cues": [],
@@ -349,6 +361,7 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "gender": args.gender,
         "strict": args.strict,
         "min_cue_duration": args.min_cue_duration,
+        "max_size_mb": args.max_size_mb,
     }
 
 

@@ -10,7 +10,7 @@ AAC_ENCODE_OPTIONS = [
     "-profile:a",
     "aac_low",
     "-b:a",
-    "128k",
+    "96k",
     "-ar",
     "48000",
     "-ac",
@@ -18,7 +18,13 @@ AAC_ENCODE_OPTIONS = [
 ]
 
 
-def burn_subtitles(video_path: Path, ass_path: Path, output_path: Path) -> str:
+def burn_subtitles(
+    video_path: Path,
+    ass_path: Path,
+    output_path: Path,
+    duration_s: float,
+    max_size_mb: float = 9.0,
+) -> str:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     filter_value = f"ass=filename='{_filter_path(ass_path.resolve())}'"
     common = [
@@ -35,13 +41,18 @@ def burn_subtitles(video_path: Path, ass_path: Path, output_path: Path) -> str:
         "yuv420p",
     ]
     audio_options = _audio_options(video_path)
+    video_kbps = int((max_size_mb * 8192 / duration_s - 96) * 0.95)
 
     try:
-        subprocess.run(_nvenc_command(common, audio_options, output_path), check=True)
+        subprocess.run(
+            _nvenc_command(common, audio_options, output_path, video_kbps), check=True
+        )
         return "h264_nvenc"
     except subprocess.CalledProcessError:
         try:
-            subprocess.run(_software_command(common, audio_options, output_path), check=True)
+            subprocess.run(
+                _software_command(common, audio_options, output_path, video_kbps), check=True
+            )
             return "libx264"
         except subprocess.CalledProcessError:
             if audio_options != AAC_ENCODE_OPTIONS:
@@ -50,7 +61,10 @@ def burn_subtitles(video_path: Path, ass_path: Path, output_path: Path) -> str:
                 "AAC-LC audio encoding failed; falling back to copying the source audio",
                 file=sys.stderr,
             )
-            subprocess.run(_software_command(common, ["-c:a", "copy"], output_path), check=True)
+            subprocess.run(
+                _software_command(common, ["-c:a", "copy"], output_path, video_kbps),
+                check=True,
+            )
             return "libx264"
 
 
@@ -76,34 +90,24 @@ def _audio_options(video_path: Path) -> list[str]:
     if not streams:
         return []
 
-    audio = streams[0]
-    if (
-        audio.get("codec_name") == "aac"
-        and audio.get("profile") == "LC"
-        and audio.get("sample_rate") == "48000"
-        and audio.get("channels") == 2
-        and _bit_rate(audio) <= 160_000
-    ):
-        return ["-c:a", "copy"]
     return AAC_ENCODE_OPTIONS
 
 
-def _bit_rate(audio: dict) -> int:
-    try:
-        return int(audio["bit_rate"])
-    except (KeyError, TypeError, ValueError):
-        return 160_001
-
-
-def _nvenc_command(common: list[str], audio: list[str], output_path: Path) -> list[str]:
+def _nvenc_command(
+    common: list[str], audio: list[str], output_path: Path, video_kbps: int
+) -> list[str]:
     return [
         *common,
         "-c:v",
         "h264_nvenc",
         "-preset",
         "p5",
-        "-cq",
-        "21",
+        "-b:v",
+        f"{video_kbps}k",
+        "-maxrate",
+        f"{int(video_kbps * 1.2)}k",
+        "-bufsize",
+        f"{video_kbps * 2}k",
         *audio,
         "-movflags",
         "+faststart",
@@ -111,13 +115,19 @@ def _nvenc_command(common: list[str], audio: list[str], output_path: Path) -> li
     ]
 
 
-def _software_command(common: list[str], audio: list[str], output_path: Path) -> list[str]:
+def _software_command(
+    common: list[str], audio: list[str], output_path: Path, video_kbps: int
+) -> list[str]:
     return [
         *common,
         "-c:v",
         "libx264",
-        "-crf",
-        "20",
+        "-b:v",
+        f"{video_kbps}k",
+        "-maxrate",
+        f"{int(video_kbps * 1.2)}k",
+        "-bufsize",
+        f"{video_kbps * 2}k",
         "-preset",
         "medium",
         *audio,
