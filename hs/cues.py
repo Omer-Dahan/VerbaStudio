@@ -82,6 +82,7 @@ def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
                 text=" ".join(display_words[:display_index]),
                 words=left_words,
                 translation_failed=cue.translation_failed,
+                translation_passthrough=cue.translation_passthrough,
             ),
             Cue(
                 start=boundary,
@@ -90,6 +91,7 @@ def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
                 text=" ".join(display_words[display_index:]),
                 words=right_words,
                 translation_failed=cue.translation_failed,
+                translation_passthrough=cue.translation_passthrough,
             ),
         )
 
@@ -101,6 +103,7 @@ def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
             " ".join(source_words[:source_index]),
             " ".join(display_words[:display_index]),
             translation_failed=cue.translation_failed,
+            translation_passthrough=cue.translation_passthrough,
         ),
         Cue(
             boundary,
@@ -108,6 +111,7 @@ def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
             " ".join(source_words[source_index:]),
             " ".join(display_words[display_index:]),
             translation_failed=cue.translation_failed,
+            translation_passthrough=cue.translation_passthrough,
         ),
     )
 
@@ -165,6 +169,9 @@ def _merge_pair(left: Cue, right: Cue) -> Cue:
         text=f"{left.display_text} {right.display_text}".strip(),
         words=[*left.words, *right.words],
         translation_failed=left.translation_failed or right.translation_failed,
+        translation_passthrough=(
+            left.translation_passthrough and right.translation_passthrough
+        ),
         cps_forced=left.cps_forced or right.cps_forced,
     )
 
@@ -199,6 +206,9 @@ def _merge_short_cues(cues: list[Cue]) -> list[Cue]:
                 text=f"{previous.display_text} {cue.display_text}".strip(),
                 words=[*previous.words, *cue.words],
                 translation_failed=previous.translation_failed or cue.translation_failed,
+                translation_passthrough=(
+                    previous.translation_passthrough and cue.translation_passthrough
+                ),
             )
         else:
             merged.append(cue)
@@ -213,6 +223,9 @@ def _merge_short_cues(cues: list[Cue]) -> list[Cue]:
                 text=f"{first.display_text} {following.display_text}".strip(),
                 words=[*first.words, *following.words],
                 translation_failed=first.translation_failed or following.translation_failed,
+                translation_passthrough=(
+                    first.translation_passthrough and following.translation_passthrough
+                ),
             )
         ]
     return merged

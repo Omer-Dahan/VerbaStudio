@@ -5,7 +5,7 @@ from unittest.mock import call, patch
 import pytest
 
 from hs.cli import build_parser, main, resolve_output_path, wait_for_translation_server
-from hs.models import Word
+from hs.models import Cue, Word
 
 
 @pytest.fixture(autouse=True)
@@ -111,9 +111,12 @@ def test_no_audio_stream_returns_exit_three(tmp_path: Path) -> None:
         assert main([str(video)]) == 3
 
 
-def test_translation_failure_returns_exit_five(tmp_path: Path) -> None:
+def test_one_translation_failure_is_reported_and_run_continues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     video = tmp_path / "source.mp4"
     video.touch()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
     word = Word(0, 1, "hello")
 
     def fail_translation(cues, *_args, **_kwargs):
@@ -124,6 +127,40 @@ def test_translation_failure_returns_exit_five(tmp_path: Path) -> None:
         patch("hs.cli.has_audio_stream", return_value=True),
         patch("hs.cli.extract_audio"),
         patch("hs.cli.transcribe", return_value=([word], "en")),
+        patch("hs.cli.TranslationClient.translate_cues", side_effect=fail_translation),
+        patch("hs.cli.build_report", return_value={
+            "cps_violations": [], "forced_cues": [], "silence_overlaps": [],
+            "translation_failures": [1], "boundary_issues": [],
+        }),
+        patch(
+            "hs.cli.write_report",
+            side_effect=lambda _report, json_path, markdown_path: (
+                json_path.write_text("{}", encoding="utf-8"),
+                markdown_path.write_text("qa", encoding="utf-8"),
+            ),
+        ),
+    ):
+        assert main([str(video), "--dry-run", "--json"]) == 0
+
+    manifest = json.loads(capsys.readouterr().out)
+    assert manifest["qa"]["translation_failures"] == 1
+
+
+def test_translation_failures_over_threshold_return_exit_five(tmp_path: Path) -> None:
+    video = tmp_path / "source.mp4"
+    video.touch()
+    words = [Word(index, index + 1, f"word {index}") for index in range(4)]
+
+    def fail_translation(cues, *_args, **_kwargs):
+        for cue in cues:
+            cue.translation_failed = True
+
+    with (
+        patch("hs.cli.probe_video", return_value={"width": 1, "height": 1, "duration": 4.0}),
+        patch("hs.cli.has_audio_stream", return_value=True),
+        patch("hs.cli.extract_audio"),
+        patch("hs.cli.transcribe", return_value=(words, "en")),
+        patch("hs.cli.segment_words", return_value=[Cue(index, index + 1, "source") for index in range(4)]),
         patch("hs.cli.TranslationClient.translate_cues", side_effect=fail_translation),
     ):
         assert main([str(video)]) == 5

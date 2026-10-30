@@ -14,6 +14,8 @@ from hs.models import Cue
 DEFAULT_BASE_URL = "http://127.0.0.1:8189"
 HEBREW = re.compile(r"[\u0590-\u05ff]")
 LATIN_SENTENCE = re.compile(r"\b[A-Za-z]+(?:[ ,'-]+[A-Za-z]+){3,}[.!?]")
+LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
+URL = re.compile(r"(?:https?://|www\.)\S+$", re.IGNORECASE)
 PROMPT_ECHOES = (
     "מתרגם מקצועי",
     "אנא תרגמו",
@@ -55,6 +57,10 @@ class TranslationClient:
         glossary = load_glossary(glossary_path) if glossary_path else {}
         history = list(glossary.items())[-2:]
         for cue in cues:
+            if should_passthrough(cue.source):
+                cue.text = cue.source
+                cue.translation_passthrough = True
+                continue
             translation = self.translate_text(
                 cue.source, source_code, gender=gender, history=history
             )
@@ -194,6 +200,15 @@ def is_sane_translation(source: str, translation: str) -> bool:
     if not 0.5 <= ratio <= 1.8 or LATIN_SENTENCE.search(cleaned):
         return False
     return not _is_repeated(cleaned)
+
+
+def should_passthrough(source: str) -> bool:
+    cleaned = source.strip()
+    return (
+        not LETTER.search(cleaned)
+        or URL.fullmatch(cleaned) is not None
+        or len(cleaned.split()) == 1
+    )
 
 
 def load_glossary(path: Path) -> dict[str, str]:

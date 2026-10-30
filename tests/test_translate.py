@@ -10,6 +10,7 @@ from hs.translate import (
     is_sane_translation,
     load_glossary,
     server_is_healthy,
+    should_passthrough,
 )
 
 
@@ -60,6 +61,39 @@ def test_failed_translation_preserves_source_and_marks_cue() -> None:
 
     assert cue.text == cue.source
     assert cue.translation_failed
+
+
+def test_atomic_cues_pass_through_without_translation() -> None:
+    request = Mock()
+    cues = [Cue(0.0, 1.0, "Minecraft"), Cue(1.0, 2.0, "26.3")]
+
+    TranslationClient(request=request).translate_cues(cues, "en")
+
+    request.assert_not_called()
+    assert [cue.text for cue in cues] == ["Minecraft", "26.3"]
+    assert all(cue.translation_passthrough for cue in cues)
+    assert not any(cue.translation_failed for cue in cues)
+
+
+def test_mixed_sentence_is_translated() -> None:
+    request = Mock(
+        return_value={"choices": [{"message": {"content": "שחקו Minecraft עכשיו"}}]}
+    )
+    cue = Cue(0.0, 2.0, "Play Minecraft now")
+
+    TranslationClient(request=request).translate_cues([cue], "en")
+
+    request.assert_called_once()
+    assert cue.text == "שחקו Minecraft עכשיו"
+    assert not cue.translation_passthrough
+
+
+def test_passthrough_classification_covers_atomic_content() -> None:
+    assert should_passthrough("Minecraft")
+    assert should_passthrough("26.3")
+    assert should_passthrough("https://example.test/path")
+    assert should_passthrough("?!")
+    assert not should_passthrough("Play Minecraft now")
 
 
 def test_sanity_checks_reject_echo_latin_sentence_and_repetition() -> None:

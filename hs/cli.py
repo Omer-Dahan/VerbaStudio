@@ -176,8 +176,14 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
             )
         except (OSError, RuntimeError, ValueError) as error:
             raise PipelineError(f"Translation failed: {error}", 5) from error
-        if any(cue.translation_failed for cue in cues):
-            raise PipelineError("Translation failed after all retry attempts", 5)
+        failure_count = sum(cue.translation_failed for cue in cues)
+        failure_limit = max(3, len(cues) * 0.1)
+        if failure_count > failure_limit:
+            raise PipelineError(
+                f"Translation failed for {failure_count} of {len(cues)} cues; "
+                f"abort threshold is more than max(3, 10% of cues) ({failure_limit:g})",
+                5,
+            )
     manifest["secs"]["translate"] = round(time.perf_counter() - translate_started, 3)
     _progress(args.progress, "translate")
     cues = enforce_reading_speed(normalize_cues(cues))

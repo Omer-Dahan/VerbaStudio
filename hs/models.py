@@ -17,6 +17,7 @@ class Cue:
     text: str | None = None
     words: list[Word] = field(default_factory=list)
     translation_failed: bool = False
+    translation_passthrough: bool = False
     cps_forced: bool = False
 
     @property
