@@ -97,7 +97,7 @@ def test_json_success_is_parseable_and_has_required_shape(
     assert manifest["ok"] is True
     assert set(manifest) == {
         "ok", "out", "srt", "ass", "lang", "engine", "model", "compute_type",
-        "cue_count", "cps_max", "qa", "secs", "exit",
+        "cue_count", "cps_max", "cps_target", "qa", "secs", "exit",
     }
 
 

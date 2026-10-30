@@ -11,7 +11,9 @@ SILENCE_START = re.compile(r"silence_start: ([0-9.]+)")
 SILENCE_END = re.compile(r"silence_end: ([0-9.]+)")
 
 
-def build_report(cues: list[Cue], video_path: Path, duration: float) -> dict:
+def build_report(
+    cues: list[Cue], video_path: Path, duration: float, cps_target: float = 17.0
+) -> dict:
     silences = detect_silences(video_path, duration)
     boundary_issues = validate_boundaries(cues, duration)
     durations = [cue.end - cue.start for cue in cues]
@@ -45,10 +47,11 @@ def build_report(cues: list[Cue], video_path: Path, duration: float) -> dict:
         "cue_count": len(cues),
         "average_duration": round(sum(durations) / len(durations), 3) if durations else 0.0,
         "under_one_second": [index for index, value in enumerate(durations, 1) if value < 1.0],
+        "cps_target": round(cps_target, 2),
         "cps_violations": [
             {"cue": index, "cps": round(characters_per_second(cue), 2)}
             for index, cue in enumerate(cues, 1)
-            if characters_per_second(cue) > 17.0
+            if characters_per_second(cue) > cps_target
         ],
         "forced_cues": [
             {"cue": index, "cps": round(characters_per_second(cue), 2)}
@@ -73,6 +76,7 @@ def write_report(report: dict, json_path: Path, markdown_path: Path) -> None:
         f"- Cues: {report['cue_count']}",
         f"- Average duration: {report['average_duration']:.3f}s",
         f"- Under one second: {len(report['under_one_second'])}",
+        f"- CPS target: {report['cps_target']:.2f}",
         f"- CPS violations: {len(report['cps_violations'])}",
         f"- Forced cues: {len(report['forced_cues'])}",
         f"- Translation failures: {len(report['translation_failures'])}",

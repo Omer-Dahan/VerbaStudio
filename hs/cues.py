@@ -28,6 +28,12 @@ def characters_per_second(cue: Cue) -> float:
     return len(cue.display_text.replace("\n", "")) / duration if duration > 0 else float("inf")
 
 
+def adaptive_cps_target(cues: list[Cue], duration: float) -> float:
+    source_length = len(" ".join(cue.source.strip() for cue in cues).strip())
+    source_cps = source_length / duration if duration > 0 else 0.0
+    return min(24.0, max(17.0, source_cps * 1.05))
+
+
 def normalize_cues(cues: list[Cue]) -> list[Cue]:
     deduplicated: list[Cue] = []
     for cue in cues:

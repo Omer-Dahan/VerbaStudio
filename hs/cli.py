@@ -12,7 +12,12 @@ from hs.ass import DEFAULT_FONT, subtitle_geometry, write_ass
 from hs.audio import extract_audio, has_audio_stream, probe_video
 from hs.burn import burn_subtitles
 from hs.cache import cache_key, restore_cache, store_cache
-from hs.cues import characters_per_second, enforce_reading_speed, normalize_cues
+from hs.cues import (
+    adaptive_cps_target,
+    characters_per_second,
+    enforce_reading_speed,
+    normalize_cues,
+)
 from hs.qa import build_report, write_report
 from hs.segment import segment_words
 from hs.srt import write_srt
@@ -191,10 +196,11 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
             )
     manifest["secs"]["translate"] = round(time.perf_counter() - translate_started, 3)
     _progress(args.progress, "translate")
-    cues = enforce_reading_speed(normalize_cues(cues))
+    cps_target = adaptive_cps_target(cues, float(metadata["duration"]))
+    cues = enforce_reading_speed(normalize_cues(cues), max_cps=cps_target)
     write_ass(cues, ass_path, int(metadata["width"]), int(metadata["height"]), args.font)
     write_srt(cues, srt_path)
-    report = build_report(cues, video, float(metadata["duration"]))
+    report = build_report(cues, video, float(metadata["duration"]), cps_target)
     write_report(report, qa_json, qa_markdown)
 
     if args.strict and (report["cps_violations"] or report.get("boundary_issues")):
@@ -205,6 +211,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     manifest["srt"] = str(srt_path)
     manifest["cue_count"] = len(cues)
     manifest["cps_max"] = round(max((characters_per_second(cue) for cue in cues), default=0.0), 2)
+    manifest["cps_target"] = round(cps_target, 2)
     manifest["qa"] = {
         "cps_violations": report["cps_violations"],
         "forced_cues": report["forced_cues"],
@@ -222,6 +229,7 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
                 "lang": manifest["lang"],
                 "cue_count": manifest["cue_count"],
                 "cps_max": manifest["cps_max"],
+                "cps_target": manifest["cps_target"],
                 "qa": manifest["qa"],
             },
             "transcript": " ".join(word.text for cue in cues for word in cue.words),
@@ -260,6 +268,7 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
         "compute_type": args.compute_type,
         "cue_count": 0,
         "cps_max": 0.0,
+        "cps_target": 17.0,
         "qa": {
             "cps_violations": [],
             "forced_cues": [],

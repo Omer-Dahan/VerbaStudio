@@ -1,4 +1,5 @@
 from hs.models import Cue, Word
+from hs.cues import adaptive_cps_target
 from hs.qa import build_report, parse_silences, validate_boundaries
 
 
@@ -32,3 +33,22 @@ def test_report_lists_forced_cues(tmp_path, monkeypatch) -> None:
     report = build_report([cue], tmp_path / "video.mp4", 1.0)
 
     assert report["forced_cues"] == [{"cue": 1, "cps": 9.0}]
+
+
+def test_adaptive_cps_target_stays_at_floor_for_normal_speech() -> None:
+    cues = [Cue(0.0, 2.0, "A normal sentence")]
+
+    assert adaptive_cps_target(cues, 2.0) == 17.0
+
+
+def test_fast_speech_raises_target_and_only_reports_excess(tmp_path, monkeypatch) -> None:
+    cues = [Cue(0.0, 2.0, "x" * 40, "א" * 44, cps_forced=True)]
+    target = adaptive_cps_target(cues, 2.0)
+    monkeypatch.setattr("hs.qa.detect_silences", lambda *_args: [])
+
+    report = build_report(cues, tmp_path / "video.mp4", 2.0, target)
+
+    assert target == 21.0
+    assert report["cps_target"] == 21.0
+    assert report["cps_violations"] == [{"cue": 1, "cps": 22.0}]
+    assert report["forced_cues"] == [{"cue": 1, "cps": 22.0}]
