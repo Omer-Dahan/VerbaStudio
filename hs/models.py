@@ -17,8 +17,8 @@ class Cue:
     text: str | None = None
     words: list[Word] = field(default_factory=list)
     translation_failed: bool = False
+    cps_forced: bool = False
 
     @property
     def display_text(self) -> str:
         return self.text if self.text is not None else self.source
-

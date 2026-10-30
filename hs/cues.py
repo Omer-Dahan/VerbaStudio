@@ -1,4 +1,9 @@
+from dataclasses import replace
+
 from hs.models import Cue, Word
+
+
+MIN_PIECE_DURATION = 0.8
 
 
 def enforce_reading_speed(cues: list[Cue], max_cps: float = 17.0) -> list[Cue]:
@@ -6,7 +11,11 @@ def enforce_reading_speed(cues: list[Cue], max_cps: float = 17.0) -> list[Cue]:
     for cue in cues:
         adjusted.extend(_split_until_readable(cue, max_cps))
     merged = _merge_short_cues(adjusted)
-    return _redistribute_timing(merged, max_cps)
+    retimed = _borrow_available_time(merged, max_cps)
+    return [
+        replace(cue, cps_forced=characters_per_second(cue) > max_cps)
+        for cue in retimed
+    ]
 
 
 def characters_per_second(cue: Cue) -> float:
@@ -15,7 +24,7 @@ def characters_per_second(cue: Cue) -> float:
 
 
 def _split_until_readable(cue: Cue, max_cps: float) -> list[Cue]:
-    if characters_per_second(cue) <= max_cps or cue.end - cue.start < 2.0:
+    if characters_per_second(cue) <= max_cps:
         return [cue]
 
     split = _split_cue(cue)
@@ -33,34 +42,39 @@ def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
     if len(display_words) < 2:
         return None
 
+    duration = cue.end - cue.start
+    if duration < MIN_PIECE_DURATION * 2:
+        return None
+
+    source_words = cue.source.split()
+    if len(source_words) < 2:
+        return None
+    source_index = _balanced_index(len(source_words), duration)
+    if source_index is None:
+        return None
+    boundary_ratio = source_index / len(source_words)
+    boundary = cue.start + duration * boundary_ratio
+
     if cue.words and len(cue.words) >= 2:
-        split_index = _best_word_boundary(cue.words)
-        if split_index is None:
-            return None
-        left_words = cue.words[:split_index]
-        right_words = cue.words[split_index:]
-        boundary_ratio = split_index / len(cue.words)
+        word_index = min(len(cue.words) - 1, max(1, round(len(cue.words) * boundary_ratio)))
+        left_words = cue.words[:word_index]
+        right_words = cue.words[word_index:]
         display_index = min(
             len(display_words) - 1,
             max(1, round(len(display_words) * boundary_ratio)),
         )
-        source_words = cue.source.split()
-        source_index = min(
-            len(source_words) - 1,
-            max(1, round(len(source_words) * boundary_ratio)),
-        )
         return (
             Cue(
-                start=left_words[0].start,
-                end=left_words[-1].end,
+                start=cue.start,
+                end=boundary,
                 source=" ".join(source_words[:source_index]),
                 text=" ".join(display_words[:display_index]),
                 words=left_words,
                 translation_failed=cue.translation_failed,
             ),
             Cue(
-                start=right_words[0].start,
-                end=right_words[-1].end,
+                start=boundary,
+                end=cue.end,
                 source=" ".join(source_words[source_index:]),
                 text=" ".join(display_words[display_index:]),
                 words=right_words,
@@ -68,13 +82,7 @@ def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
             ),
         )
 
-    display_index = len(display_words) // 2
-    ratio = display_index / len(display_words)
-    boundary = cue.start + (cue.end - cue.start) * ratio
-    if boundary - cue.start < 1.0 or cue.end - boundary < 1.0:
-        return None
-    source_words = cue.source.split()
-    source_index = min(len(source_words) - 1, max(1, round(len(source_words) * ratio)))
+    display_index = min(len(display_words) - 1, max(1, round(len(display_words) * boundary_ratio)))
     return (
         Cue(
             cue.start,
@@ -93,23 +101,18 @@ def _split_cue(cue: Cue) -> tuple[Cue, Cue] | None:
     )
 
 
-def _best_word_boundary(words: list[Word]) -> int | None:
-    candidates = [
-        index
-        for index in range(1, len(words))
-        if words[index - 1].end - words[0].start >= 1.0
-        and words[-1].end - words[index].start >= 1.0
-    ]
+def _balanced_index(word_count: int, duration: float) -> int | None:
+    candidates = [index for index in range(1, word_count) if duration * index / word_count >= MIN_PIECE_DURATION and duration * (word_count - index) / word_count >= MIN_PIECE_DURATION]
     if not candidates:
         return None
-    midpoint = len(words) / 2
+    midpoint = word_count / 2
     return min(candidates, key=lambda index: abs(index - midpoint))
 
 
 def _merge_short_cues(cues: list[Cue]) -> list[Cue]:
     merged: list[Cue] = []
     for cue in cues:
-        if merged and cue.end - cue.start < 1.0:
+        if merged and cue.end - cue.start < MIN_PIECE_DURATION:
             previous = merged[-1]
             merged[-1] = Cue(
                 start=previous.start,
@@ -122,7 +125,7 @@ def _merge_short_cues(cues: list[Cue]) -> list[Cue]:
         else:
             merged.append(cue)
 
-    if len(merged) > 1 and merged[0].end - merged[0].start < 1.0:
+    if len(merged) > 1 and merged[0].end - merged[0].start < MIN_PIECE_DURATION:
         first, following = merged[:2]
         merged[:2] = [
             Cue(
@@ -137,33 +140,20 @@ def _merge_short_cues(cues: list[Cue]) -> list[Cue]:
     return merged
 
 
-def _redistribute_timing(cues: list[Cue], max_cps: float) -> list[Cue]:
-    if not cues or not any(characters_per_second(cue) > max_cps for cue in cues):
-        return cues
-
-    span = cues[-1].end - cues[0].start
-    character_counts = [len(cue.display_text.replace("\n", "")) for cue in cues]
-    total_characters = sum(character_counts)
-    if span <= 0 or total_characters / span > max_cps:
-        return cues
-
+def _borrow_available_time(cues: list[Cue], max_cps: float) -> list[Cue]:
     retimed: list[Cue] = []
-    cursor = cues[0].start
-    for index, (cue, character_count) in enumerate(zip(cues, character_counts)):
-        end = (
-            cues[-1].end
-            if index == len(cues) - 1
-            else cursor + span * character_count / total_characters
-        )
-        retimed.append(
-            Cue(
-                start=cursor,
-                end=end,
-                source=cue.source,
-                text=cue.text,
-                words=cue.words,
-                translation_failed=cue.translation_failed,
-            )
-        )
-        cursor = end
+    for index, cue in enumerate(cues):
+        earliest = retimed[-1].end if retimed else 0.0
+        latest = cues[index + 1].start if index + 1 < len(cues) else cue.end
+        required = len(cue.display_text.replace("\n", "")) / max_cps
+        available = latest - earliest
+        if required <= available and required > cue.end - cue.start:
+            extra = required - (cue.end - cue.start)
+            leading = min(cue.start - earliest, extra / 2)
+            start = cue.start - leading
+            end = min(latest, start + required)
+            start = max(earliest, end - required)
+            retimed.append(replace(cue, start=start, end=end))
+        else:
+            retimed.append(cue)
     return retimed
