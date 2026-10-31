@@ -103,6 +103,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dry-run", action="store_true", help="Write ASS and QA files without burning video")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable run manifest")
+    parser.add_argument(
+        "--keep",
+        action="store_true",
+        help="Keep subtitle and QA artifacts beside the output and enable the cache",
+    )
     parser.add_argument("--force", action="store_true", help="Ignore cached transcription and translation")
     parser.add_argument("--srt-only", action="store_true", help="Write SRT and ASS files without burning")
     parser.add_argument("--progress", type=Path, help="Append stage updates as JSON lines")
@@ -127,7 +132,11 @@ def main(argv: list[str] | None = None) -> int:
     started = time.perf_counter()
     manifest = _empty_manifest(args)
     try:
-        exit_code = _run(args, manifest, started)
+        if args.keep:
+            exit_code = _run(args, manifest, started)
+        else:
+            with tempfile.TemporaryDirectory(prefix="hebrew-subtitles-") as temp_dir:
+                exit_code = _run(args, manifest, started, Path(temp_dir))
     except PipelineError as error:
         print(f"Error: {error}", file=sys.stderr)
         manifest["secs"]["total"] = round(time.perf_counter() - started, 3)
@@ -141,7 +150,12 @@ def main(argv: list[str] | None = None) -> int:
     return exit_code
 
 
-def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
+def _run(
+    args: argparse.Namespace,
+    manifest: dict,
+    started: float,
+    artifact_dir: Path | None = None,
+) -> int:
     _progress(args.progress, "start")
     video = args.video.resolve()
     if not video.is_file():
@@ -153,7 +167,9 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
         output = resolve_output_path(video, args.output)
     except ValueError as error:
         raise PipelineError(str(error), 2) from error
-    artifact_base = output.with_suffix("")
+    artifact_base = (
+        artifact_dir / output.stem if artifact_dir is not None else output.with_suffix("")
+    )
     ass_path = artifact_base.with_suffix(".ass")
     srt_path = artifact_base.with_suffix(".srt")
     qa_json = artifact_base.with_suffix(".qa.json")
@@ -168,13 +184,15 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     }
     try:
         metadata = probe_video(video)
-        if metadata.get("hebsub") == "1" or _matches_known_output(video):
+        if metadata.get("hebsub") == "1" or (
+            args.keep and _matches_known_output(video)
+        ):
             raise PipelineError(ALREADY_SUBTITLED_MESSAGE, 2)
     except PipelineError:
         raise
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         raise PipelineError(f"Cannot read input video: {error}", 2) from error
-    if not args.force:
+    if args.keep and not args.force:
         cached = restore_cache(cache_dir, cache_artifacts)
         if cached is not None and (args.dry_run or args.srt_only or output.is_file()):
             manifest.update(cached["manifest"])
@@ -333,26 +351,27 @@ def _run(args: argparse.Namespace, manifest: dict, started: float) -> int:
     )
     print(f"ASS: {ass_path}", file=sys.stderr)
     print(f"QA: {qa_json}", file=sys.stderr)
-    store_cache(
-        cache_dir,
-        cache_artifacts,
-        {
-            "manifest": {
-                "ass": str(ass_path),
-                "lang": manifest["lang"],
-                "cue_count": manifest["cue_count"],
-                "cps_max": manifest["cps_max"],
-                "cps_target": manifest["cps_target"],
-                "no_word_loss": manifest["no_word_loss"],
-                "qa": manifest["qa"],
-                "downscaled": manifest["downscaled"],
-                "quality_floor_hit": manifest["quality_floor_hit"],
-                "existing_captions": manifest["existing_captions"],
+    if args.keep:
+        store_cache(
+            cache_dir,
+            cache_artifacts,
+            {
+                "manifest": {
+                    "ass": str(ass_path),
+                    "lang": manifest["lang"],
+                    "cue_count": manifest["cue_count"],
+                    "cps_max": manifest["cps_max"],
+                    "cps_target": manifest["cps_target"],
+                    "no_word_loss": manifest["no_word_loss"],
+                    "qa": manifest["qa"],
+                    "downscaled": manifest["downscaled"],
+                    "quality_floor_hit": manifest["quality_floor_hit"],
+                    "existing_captions": manifest["existing_captions"],
+                },
+                "transcript": " ".join(word.text for cue in cues for word in cue.words),
+                "cue_source": " ".join(cue.source for cue in cues),
             },
-            "transcript": " ".join(word.text for cue in cues for word in cue.words),
-            "cue_source": " ".join(cue.source for cue in cues),
-        },
-    )
+        )
     if args.dry_run or args.srt_only:
         manifest["ok"] = True
         manifest["secs"]["total"] = round(time.perf_counter() - started, 3)

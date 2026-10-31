@@ -103,7 +103,7 @@ def test_tagged_input_is_rejected_before_asr(
         ),
         patch("hs.cli.transcribe") as transcribe_mock,
     ):
-        assert main([str(video), "--force"]) == 2
+        assert main([str(video), "--force", "--keep"]) == 2
 
     assert capsys.readouterr().err.strip() == f"Error: {ALREADY_SUBTITLED_MESSAGE}"
     transcribe_mock.assert_not_called()
@@ -378,7 +378,7 @@ def test_repeat_run_uses_cache_and_force_bypasses_it(
         patch("hs.cli.write_report", side_effect=write_report_files),
         patch("hs.cli.burn_subtitles", side_effect=burn_file),
     ):
-        argv = [str(video), "-o", str(output)]
+        argv = [str(video), "-o", str(output), "--keep"]
         assert main(argv) == 0
         assert main(argv) == 0
         assert transcribe_mock.call_count == 1
@@ -418,7 +418,10 @@ def test_srt_only_writes_subtitles_and_jsonl_progress(
         patch("hs.cli.burn_subtitles") as burn_mock,
     ):
         assert main(
-            [str(video), "-o", str(output), "--srt-only", "--progress", str(progress)]
+            [
+                str(video), "-o", str(output), "--srt-only", "--progress",
+                str(progress), "--keep",
+            ]
         ) == 0
 
     assert output.with_suffix(".ass").is_file()
