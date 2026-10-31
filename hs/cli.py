@@ -205,6 +205,8 @@ def _run(
             if manifest["out"]:
                 manifest["size_mb"] = round(output.stat().st_size / 1024**2, 3)
             manifest["srt"] = str(srt_path)
+            manifest["persisted"] = True
+            manifest["artifacts"] = [str(path) for path in cache_artifacts.values()]
             manifest["ok"] = True
             manifest["exit"] = 0
             manifest["secs"] = {
@@ -323,6 +325,9 @@ def _run(
 
     manifest["ass"] = str(ass_path)
     manifest["srt"] = str(srt_path)
+    if args.keep:
+        manifest["persisted"] = True
+        manifest["artifacts"] = [str(path) for path in cache_artifacts.values()]
     manifest["cue_count"] = len(cues)
     manifest["cps_max"] = round(max((characters_per_second(cue) for cue in cues), default=0.0), 2)
     manifest["cps_target"] = round(cps_target, 2)
@@ -446,6 +451,8 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
     return {
         "ok": False,
         "out": None,
+        "persisted": False,
+        "artifacts": [],
         "srt": None,
         "ass": "",
         "lang": args.language or "",

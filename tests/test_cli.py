@@ -173,8 +173,53 @@ def test_json_success_is_parseable_and_has_required_shape(
         "ok", "out", "srt", "ass", "lang", "engine", "model", "compute_type",
         "cue_count", "cps_max", "cps_target", "qa", "secs", "exit",
         "no_word_loss", "size_mb", "downscaled", "quality_floor_hit",
-        "existing_captions",
+        "existing_captions", "persisted", "artifacts",
     }
+    assert manifest["persisted"] is False
+    assert manifest["artifacts"] == []
+
+
+def test_keep_manifest_lists_persisted_artifacts(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.touch()
+    output = tmp_path / "result.mp4"
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    fake_report = {
+        "cps_violations": [], "forced_cues": [], "silence_overlaps": [],
+        "translation_failures": [], "passthrough": 0,
+    }
+
+    with (
+        patch("hs.cli.probe_video", return_value={"width": 1, "height": 1, "duration": 2.0}),
+        patch("hs.cli.has_audio_stream", return_value=True),
+        patch("hs.cli.extract_audio"),
+        patch("hs.cli.transcribe", return_value=([Word(0, 1, "hello")], "en")),
+        patch("hs.cli.TranslationClient.translate_cues"),
+        patch("hs.cli.build_report", return_value=fake_report),
+        patch(
+            "hs.cli.write_report",
+            side_effect=lambda _report, json_path, markdown_path: (
+                json_path.write_text("{}", encoding="utf-8"),
+                markdown_path.write_text("qa", encoding="utf-8"),
+            ),
+        ),
+    ):
+        assert main([
+            str(video), "-o", str(output), "--json", "--dry-run", "--keep",
+        ]) == 0
+
+    manifest = json.loads(capsys.readouterr().out)
+    assert manifest["persisted"] is True
+    assert manifest["artifacts"] == [
+        str(output.with_suffix(".ass")),
+        str(output.with_suffix(".srt")),
+        str(output.with_suffix(".qa.json")),
+        str(output.with_suffix(".qa.md")),
+    ]
 
 
 def test_asr_model_is_released_before_translation_client_is_constructed(
