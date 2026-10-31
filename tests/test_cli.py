@@ -532,3 +532,88 @@ def test_qa_is_soft_by_default_and_strict_returns_seven(
         assert main([str(video), "--force", "--strict"]) == 7
 
     burn_mock.assert_called_once()
+
+
+def test_default_run_retains_only_video_and_keep_retains_all_artifacts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.write_bytes(b"video")
+    home = tmp_path / "home"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    report = {
+        "cps_violations": [], "forced_cues": [], "silence_overlaps": [],
+        "translation_failures": [], "passthrough": 0, "boundary_issues": [],
+    }
+
+    def write_ass_file(_cues, path, *_args):
+        path.write_text("ass", encoding="utf-8")
+
+    def write_report_files(_report, json_path, markdown_path):
+        json_path.write_text("{}", encoding="utf-8")
+        markdown_path.write_text("qa", encoding="utf-8")
+
+    def burn_file(_video, _ass, output, _duration, _max_size, _font):
+        output.write_bytes(b"rendered")
+        return BurnResult("test", False, False)
+
+    with (
+        patch("hs.cli.probe_video", return_value={"width": 1, "height": 1, "duration": 2.0}),
+        patch("hs.cli.has_audio_stream", return_value=True),
+        patch("hs.cli.extract_audio"),
+        patch("hs.cli.transcribe", return_value=([Word(0, 2, "hello")], "en")),
+        patch("hs.cli.TranslationClient.translate_cues"),
+        patch("hs.cli.write_ass", side_effect=write_ass_file),
+        patch("hs.cli.build_report", return_value=report),
+        patch("hs.cli.write_report", side_effect=write_report_files),
+        patch("hs.cli.burn_subtitles", side_effect=burn_file),
+    ):
+        private_output = tmp_path / "private.mp4"
+        assert main([str(video), "-o", str(private_output)]) == 0
+        assert private_output.is_file()
+        assert not list(tmp_path.glob("private.ass"))
+        assert not list(tmp_path.glob("private.srt"))
+        assert not list(tmp_path.glob("private.qa.*"))
+        assert not (home / ".cache/hebrew-subs").exists()
+
+        kept_output = tmp_path / "kept.mp4"
+        assert main([str(video), "-o", str(kept_output), "--keep"]) == 0
+
+    assert kept_output.is_file()
+    assert kept_output.with_suffix(".ass").is_file()
+    assert kept_output.with_suffix(".srt").is_file()
+    assert kept_output.with_suffix(".qa.json").is_file()
+    assert kept_output.with_suffix(".qa.md").is_file()
+    cache_entries = list((home / ".cache/hebrew-subs").iterdir())
+    assert len(cache_entries) == 1
+    assert (cache_entries[0] / "run.json").is_file()
+
+
+@pytest.mark.parametrize("interruption", [RuntimeError("failure"), KeyboardInterrupt()])
+def test_temporary_artifacts_are_removed_on_abnormal_exit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    interruption: BaseException,
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.touch()
+    artifact_paths: list[Path] = []
+
+    def interrupt_after_ass(_cues, path, *_args):
+        path.write_text("ass", encoding="utf-8")
+        artifact_paths.append(path)
+        raise interruption
+
+    with (
+        patch("hs.cli.probe_video", return_value={"width": 1, "height": 1, "duration": 2.0}),
+        patch("hs.cli.has_audio_stream", return_value=True),
+        patch("hs.cli.extract_audio"),
+        patch("hs.cli.transcribe", return_value=([Word(0, 2, "hello")], "en")),
+        patch("hs.cli.TranslationClient.translate_cues"),
+        patch("hs.cli.write_ass", side_effect=interrupt_after_ass),
+        pytest.raises(type(interruption)),
+    ):
+        main([str(video)])
+
+    assert artifact_paths
+    assert not artifact_paths[0].parent.exists()
