@@ -27,6 +27,7 @@ PROMPT_ECHOES = (
 )
 PROMPT_TEMPLATE = """You are a professional {source_lang} ({source_code}) to {target_lang} ({target_code}) translator. Your goal is to accurately convey the meaning and nuances of the original {source_lang} text while adhering to {target_lang} grammar, vocabulary, and cultural sensitivities.
 Produce only the {target_lang} translation, without any additional explanations or commentary. Please translate the following {source_lang} text into {target_lang}:
+Write natural, warm spoken {target_lang} that a person would actually say out loud - not literal, not robotic. Keep every ellipsis (...) and every question or exclamation mark that appears in the source; never drop, shorten or merge them.
 
 {text}"""
 GENDER_HINTS = {

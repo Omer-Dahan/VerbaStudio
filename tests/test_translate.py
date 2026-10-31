@@ -34,6 +34,20 @@ def test_official_prompt_has_quoted_text_after_two_newlines() -> None:
     assert prompt.endswith('\n\n"How are you?"')
 
 
+def test_prompt_template_instructs_to_keep_ellipses() -> None:
+    assert "ellipsis" in PROMPT_TEMPLATE
+    assert "..." in PROMPT_TEMPLATE
+
+
+def test_ellipsis_survives_normalize_and_passthrough() -> None:
+    from hs.text import normalize_subtitle_text
+
+    source = "רגע, חכה…"
+    assert not should_passthrough(source)
+    assert normalize_subtitle_text(source) == source
+    assert is_sane_translation(source, source)
+
+
 def test_client_retries_prompt_echo_and_accepts_hebrew() -> None:
     responses = iter(
         [
