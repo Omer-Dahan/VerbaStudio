@@ -297,6 +297,22 @@ def test_translation_failures_over_threshold_return_exit_five(tmp_path: Path) ->
         assert main([str(video)]) == 5
 
 
+def test_exception_details_are_only_logged_in_verbose_mode(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.touch()
+    private_text = "private transcript fragment"
+
+    for extra_args, visible in (([], False), (["--verbose"], True)):
+        with patch("hs.cli.probe_video", side_effect=ValueError(private_text)):
+            assert main([str(video), *extra_args]) == 2
+
+        error = capsys.readouterr().err
+        assert (private_text in error) is visible
+        assert "Cannot read input video" in error
+
+
 def test_unavailable_translation_server_returns_exit_five(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

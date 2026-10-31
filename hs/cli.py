@@ -104,6 +104,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true", help="Write ASS and QA files without burning video")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable run manifest")
     parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Include underlying tool and server errors in stderr",
+    )
+    parser.add_argument(
         "--keep",
         action="store_true",
         help="Keep subtitle and QA artifacts beside the output and enable the cache",
@@ -191,7 +196,7 @@ def _run(
     except PipelineError:
         raise
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
-        raise PipelineError(f"Cannot read input video: {error}", 2) from error
+        raise _stage_error("Cannot read input video", error, 2, args.verbose) from error
     if args.keep and not args.force:
         cached = restore_cache(cache_dir, cache_artifacts)
         if cached is not None and (args.dry_run or args.srt_only or output.is_file()):
@@ -219,7 +224,7 @@ def _run(
     except PipelineError:
         raise
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
-        raise PipelineError(f"Cannot read input video: {error}", 2) from error
+        raise _stage_error("Cannot read input video", error, 2, args.verbose) from error
     _progress(args.progress, "probe")
     existing_captions = detect_existing_captions(
         video,
@@ -241,7 +246,7 @@ def _run(
                 compute_type=args.compute_type,
             )
     except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
-        raise PipelineError(f"ASR failed: {error}", 4) from error
+        raise _stage_error("ASR failed", error, 4, args.verbose) from error
     manifest["secs"]["asr"] = round(time.perf_counter() - asr_started, 3)
     _progress(args.progress, "asr")
 
@@ -267,7 +272,7 @@ def _run(
                 cues, source_language, args.glossary, args.gender
             )
         except (OSError, RuntimeError, ValueError) as error:
-            raise PipelineError(f"Translation failed: {error}", 5) from error
+            raise _stage_error("Translation failed", error, 5, args.verbose) from error
         failure_count = sum(cue.translation_failed for cue in cues)
         failure_limit = max(3, len(cues) * 0.1)
         if failure_count > failure_limit:
@@ -388,7 +393,7 @@ def _run(
             args.font,
         )
     except (OSError, subprocess.CalledProcessError) as error:
-        raise PipelineError(f"Burn failed: {error}", 6) from error
+        raise _stage_error("Burn failed", error, 6, args.verbose) from error
     manifest["secs"]["burn"] = round(time.perf_counter() - burn_started, 3)
     _progress(args.progress, "burn")
     manifest["out"] = str(output)
@@ -466,6 +471,13 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
         "secs": {"asr": 0.0, "translate": 0.0, "burn": 0.0, "total": 0.0},
         "exit": 0,
     }
+
+
+def _stage_error(
+    message: str, error: BaseException, exit_code: int, verbose: bool
+) -> PipelineError:
+    detail = f": {error}" if verbose else ""
+    return PipelineError(f"{message}{detail}", exit_code)
 
 
 def _cache_settings(args: argparse.Namespace) -> dict:
