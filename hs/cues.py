@@ -139,6 +139,13 @@ def word_sequence_is_complete(cues: list[Cue], transcript: list[Word]) -> bool:
     return [word for cue in cues for word in cue.words] == transcript
 
 
+def normalize_sentence_cues(cues: list[Cue]) -> list[Cue]:
+    return [
+        replace(cue, text=normalize_subtitle_text(cue.text)) if cue.text is not None else cue
+        for cue in cues
+    ]
+
+
 def normalize_cues(cues: list[Cue], min_cue_duration: float = 0.40) -> list[Cue]:
     deduplicated: list[Cue] = []
     for cue in cues:

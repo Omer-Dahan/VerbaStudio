@@ -1,5 +1,5 @@
 from hs.models import Word
-from hs.segment import segment_words
+from hs.segment import segment_sentences, segment_words
 
 
 def make_words(texts: list[str], step: float = 0.45, gap_after: dict[int, float] | None = None):
@@ -150,6 +150,76 @@ def test_merged_fragment_splits_at_word_boundary_to_fit_line_budget() -> None:
         all(len(line) <= 12 for line in _wrap_source(cue.source, 12))
         for cue in cues
     )
+
+
+def test_sentence_segmenter_closes_on_terminal_punctuation_once_minimum_duration_reached() -> None:
+    words = make_words(["This", "is", "one", "sentence.", "This", "is", "two."])
+
+    cues = segment_sentences(words)
+
+    assert [cue.source for cue in cues] == ["This is one sentence.", "This is two."]
+    assert cues[0].start == words[0].start
+    assert cues[0].end == words[3].end
+    assert cues[0].end - cues[0].start >= 1.2
+    assert cues[1].start == words[4].start
+    assert cues[1].end == words[-1].end
+
+
+def test_sentence_segmenter_closes_on_long_pause_without_punctuation() -> None:
+    words = make_words(
+        ["one", "two", "three", "four", "five", "six"], gap_after={2: 0.45}
+    )
+
+    cues = segment_sentences(words)
+
+    assert [cue.source for cue in cues] == ["one two three", "four five six"]
+    assert cues[1].start - cues[0].end >= 0.40
+
+
+def test_sentence_shorter_than_minimum_merges_into_following_sentence() -> None:
+    words = make_words(["Ok.", "This", "is", "fine."])
+
+    cues = segment_sentences(words)
+
+    assert [cue.source for cue in cues] == ["Ok. This is fine."]
+    assert cues[0].end - cues[0].start >= 1.2
+
+
+def test_sentence_segmenter_preserves_every_word_across_boundaries() -> None:
+    words = make_words(
+        ["This", "ends.", "And", "this", "one", "keeps", "going", "without", "stopping."]
+    )
+
+    cues = segment_sentences(words)
+
+    assert [word for cue in cues for word in cue.words] == words
+    assert " ".join(cue.source for cue in cues) == " ".join(word.text for word in words)
+
+
+def test_long_sentence_without_pauses_is_capped_at_the_largest_internal_gap() -> None:
+    words = make_words([f"word{i}" for i in range(40)], gap_after={20: 0.25})
+
+    cues = segment_sentences(words)
+
+    assert len(cues) == 2
+    assert cues[0].words[-1] is words[20]
+    assert cues[1].words[0] is words[21]
+    assert all(cue.end - cue.start <= 14.0 for cue in cues)
+    assert [word for cue in cues for word in cue.words] == words
+
+
+def test_long_sentence_with_no_internal_pause_is_capped_at_the_duration_limit() -> None:
+    words = [Word(index * 0.3, index * 0.3 + 0.3, f"w{index}") for index in range(50)]
+
+    cues = segment_sentences(words)
+
+    assert len(cues) == 2
+    assert all(cue.end - cue.start <= 14.0 for cue in cues)
+    assert [word for cue in cues for word in cue.words] == words
+
+
+def test_segment_sentences_returns_empty_for_no_words() -> None:
+    assert segment_sentences([]) == []
 
 
 def _wrap_source(text: str, max_chars: int) -> list[str]:

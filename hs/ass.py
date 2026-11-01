@@ -62,7 +62,7 @@ Style: Default,{font},{font_size},&H00FFFFFF,&H000000FF,&H00000000,{back_colour}
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     events = [
-        f"Dialogue: 0,{format_timestamp(cue.start)},{format_timestamp(cue.end)},Default,,0,0,0,,{{\\q2}}{_ass_text(cue.display_text, max_chars)}"
+        f"Dialogue: 0,{format_timestamp(cue.start)},{format_timestamp(cue.end)},Default,,0,0,0,,{{\\q2}}{_ass_text(cue.display_text, max_chars, font_size)}"
         for cue in cues
     ]
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -98,12 +98,10 @@ def format_timestamp(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d}.{fraction:02d}"
 
 
-def _ass_text(text: str, max_chars: int) -> str:
-    safe = normalize_subtitle_text(text).replace("\\", "＼").replace("{", "｛").replace("}", "｝")
-    tokens = safe.replace("\n", " ").split()
-    if not tokens:
-        return _bidi_line("")
+REDUCED_FONT_SCALE = 0.9
 
+
+def _wrap_tokens(tokens: list[str], max_chars: int) -> list[str]:
     lines: list[str] = []
     current = ""
     for token in tokens:
@@ -114,7 +112,33 @@ def _ass_text(text: str, max_chars: int) -> str:
         else:
             current = candidate
     lines.append(current)
-    return r"\N".join(_bidi_line(line) for line in lines)
+    return lines
+
+
+def layout_cue_lines(
+    text: str, max_chars: int, font_size: int | None = None
+) -> tuple[list[str], int | None]:
+    """Wrap text to lines, falling back to a smaller font for a third line instead of truncating."""
+    safe = normalize_subtitle_text(text).replace("\\", "＼").replace("{", "｛").replace("}", "｝")
+    tokens = safe.replace("\n", " ").split()
+    if not tokens:
+        return [""], font_size
+
+    lines = _wrap_tokens(tokens, max_chars)
+    if len(lines) <= 2 or font_size is None:
+        return lines, font_size
+
+    reduced_font = max(1, round(font_size * REDUCED_FONT_SCALE))
+    reduced_chars = math.ceil(max_chars / REDUCED_FONT_SCALE)
+    return _wrap_tokens(tokens, reduced_chars), reduced_font
+
+
+def _ass_text(text: str, max_chars: int, font_size: int | None = None) -> str:
+    lines, used_font = layout_cue_lines(text, max_chars, font_size)
+    body = r"\N".join(_bidi_line(line) for line in lines)
+    if font_size is not None and used_font != font_size:
+        return f"{{\\fs{used_font}}}{body}"
+    return body
 
 
 def _bidi_line(text: str) -> str:

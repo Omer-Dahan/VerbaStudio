@@ -18,10 +18,11 @@ from hs.cues import (
     characters_per_second,
     enforce_reading_speed,
     normalize_cues,
+    normalize_sentence_cues,
     word_sequence_is_complete,
 )
 from hs.qa import build_report, write_report
-from hs.segment import segment_words
+from hs.segment import segment_sentences, segment_words
 from hs.srt import write_srt
 from hs.transcribe import DEFAULT_MODEL, transcribe
 from hs.translate import (
@@ -128,6 +129,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_float,
         default=0.40,
         help="Minimum cue duration in seconds (default: 0.40)",
+    )
+    parser.add_argument(
+        "--cue-style",
+        choices=("sentences", "words"),
+        default="sentences",
+        help="One cue per sentence (default), or the legacy word-budget cues",
     )
     return parser
 
@@ -255,7 +262,10 @@ def _run(
     _, _, max_chars = subtitle_geometry(
         int(metadata["width"]), int(metadata["height"]), args.size_scale
     )
-    cues = segment_words(words, max_chars=max_chars)
+    if args.cue_style == "words":
+        cues = segment_words(words, max_chars=max_chars)
+    else:
+        cues = segment_sentences(words)
     if not cues:
         raise PipelineError("ASR failed: Whisper produced no timestamped words", 4)
     source_language = args.language or detected_language
@@ -286,12 +296,15 @@ def _run(
     manifest["secs"]["translate"] = round(time.perf_counter() - translate_started, 3)
     _progress(args.progress, "translate")
     cps_target = adaptive_cps_target(cues, float(metadata["duration"]))
-    cues = enforce_reading_speed(
-        normalize_cues(cues, min_cue_duration=args.min_cue_duration),
-        max_cps=cps_target,
-        min_cue_duration=args.min_cue_duration,
-        max_chars=max_chars,
-    )
+    if args.cue_style == "words":
+        cues = enforce_reading_speed(
+            normalize_cues(cues, min_cue_duration=args.min_cue_duration),
+            max_cps=cps_target,
+            min_cue_duration=args.min_cue_duration,
+            max_chars=max_chars,
+        )
+    else:
+        cues = normalize_sentence_cues(cues)
     manifest["no_word_loss"] = word_sequence_is_complete(cues, words)
     if not manifest["no_word_loss"]:
         raise PipelineError("Cue normalization lost or duplicated transcript words", 7)
@@ -320,6 +333,7 @@ def _run(
         existing_captions["band"] if existing_captions["detected"] else None,
         args.position,
         args.margin_v,
+        args.cue_style,
     )
     write_report(report, qa_json, qa_markdown)
 
@@ -511,6 +525,7 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "strict": args.strict,
         "min_cue_duration": args.min_cue_duration,
         "max_size_mb": args.max_size_mb,
+        "cue_style": args.cue_style,
     }
 
 

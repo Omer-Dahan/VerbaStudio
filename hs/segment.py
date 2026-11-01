@@ -15,6 +15,93 @@ ENGLISH_VERB = re.compile(
 )
 SUBJECT_PRONOUNS = {"he", "i", "it", "she", "they", "we", "you"}
 
+SENTENCE_TERMINATOR = re.compile(r"[.!?…][\"'”’)]*$")
+MIN_SENTENCE_DURATION = 1.2
+SENTENCE_PAUSE_GAP = 0.40
+MAX_SENTENCE_DURATION = 14.0
+MAX_SENTENCE_CHARS = 180
+
+
+def segment_sentences(words: list[Word]) -> list[Cue]:
+    if not words:
+        return []
+
+    groups = _split_into_sentences(words)
+    groups = [part for group in groups for part in _split_oversized_sentence(group)]
+    groups = _merge_short_sentences(groups)
+    return [
+        Cue(start=group[0].start, end=group[-1].end, source=_join_words(group), words=group)
+        for group in groups
+    ]
+
+
+def _split_into_sentences(words: list[Word]) -> list[list[Word]]:
+    groups: list[list[Word]] = []
+    current: list[Word] = []
+    for index, word in enumerate(words):
+        current.append(word)
+        duration = current[-1].end - current[0].start
+        if duration < MIN_SENTENCE_DURATION:
+            continue
+        is_last = index == len(words) - 1
+        gap = None if is_last else words[index + 1].start - word.end
+        if SENTENCE_TERMINATOR.search(word.text) or (gap is not None and gap >= SENTENCE_PAUSE_GAP):
+            groups.append(current)
+            current = []
+    if current:
+        groups.append(current)
+    return groups
+
+
+def _split_oversized_sentence(words: list[Word]) -> list[list[Word]]:
+    duration = words[-1].end - words[0].start
+    text_length = len(_join_words(words))
+    if duration <= MAX_SENTENCE_DURATION and text_length <= MAX_SENTENCE_CHARS:
+        return [words]
+    if len(words) < 2:
+        return [words]
+
+    gaps = [(words[index + 1].start - words[index].end, index) for index in range(len(words) - 1)]
+    max_gap, split_index = max(gaps, key=lambda item: item[0])
+    if max_gap <= 0:
+        split_index = _cap_boundary_index(words)
+
+    left = words[: split_index + 1]
+    right = words[split_index + 1 :]
+    if not left or not right:
+        return [words]
+    return [*_split_oversized_sentence(left), *_split_oversized_sentence(right)]
+
+
+def _cap_boundary_index(words: list[Word]) -> int:
+    start = words[0].start
+    length = 0
+    for index, word in enumerate(words):
+        length += len(word.text) + 1
+        if word.end - start >= MAX_SENTENCE_DURATION or length >= MAX_SENTENCE_CHARS:
+            return max(0, index - 1) if index > 0 else 0
+    return len(words) - 2
+
+
+def _merge_short_sentences(groups: list[list[Word]]) -> list[list[Word]]:
+    merged: list[list[Word]] = []
+    index = 0
+    while index < len(groups):
+        group = groups[index]
+        duration = group[-1].end - group[0].start
+        if duration < MIN_SENTENCE_DURATION:
+            if index + 1 < len(groups):
+                groups[index + 1] = [*group, *groups[index + 1]]
+                index += 1
+                continue
+            if merged:
+                merged[-1] = [*merged[-1], *group]
+                index += 1
+                continue
+        merged.append(group)
+        index += 1
+    return merged
+
 
 def segment_words(
     words: list[Word],

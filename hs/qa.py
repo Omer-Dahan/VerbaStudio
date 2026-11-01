@@ -3,7 +3,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from hs.ass import _ass_text, subtitle_geometry, subtitle_layout
+from hs.ass import layout_cue_lines, subtitle_geometry, subtitle_layout
 from hs.cues import characters_per_second
 from hs.models import Cue
 
@@ -23,6 +23,7 @@ def build_report(
     caption_band: list[int] | None = None,
     position: str = "auto",
     margin_v: int | None = None,
+    cue_style: str = "sentences",
 ) -> dict:
     silences = detect_silences(video_path, duration)
     boundary_issues = validate_boundaries(cues, duration)
@@ -56,8 +57,14 @@ def build_report(
     layout_bands, layout_conflicts = analyze_layout(
         cues, width, height, size_scale, caption_band, position, margin_v
     )
+    three_line_cues = _count_three_line_cues(cues, width, height, size_scale)
     return {
         "cue_count": len(cues),
+        "cue_style": cue_style,
+        "sentences": len(cues),
+        "mean_sentence_s": round(sum(durations) / len(durations), 3) if durations else 0.0,
+        "max_sentence_s": round(max(durations), 3) if durations else 0.0,
+        "three_line_cues": three_line_cues,
         "average_duration": round(sum(durations) / len(durations), 3) if durations else 0.0,
         "under_one_second": [index for index, value in enumerate(durations, 1) if value < 1.0],
         "cps_target": round(cps_target, 2),
@@ -84,12 +91,31 @@ def build_report(
     }
 
 
+def _count_three_line_cues(
+    cues: list[Cue], width: int | None, height: int | None, size_scale: float
+) -> int:
+    if width is None or height is None:
+        return 0
+    font_size, _, max_chars = subtitle_geometry(width, height, size_scale)
+    count = 0
+    for cue in cues:
+        _, used_font = layout_cue_lines(cue.display_text, max_chars, font_size)
+        if used_font != font_size:
+            count += 1
+    return count
+
+
 def write_report(report: dict, json_path: Path, markdown_path: Path) -> None:
     json_path.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     lines = [
         "# Subtitle QA",
         "",
+        f"- Cue style: {report.get('cue_style', 'sentences')}",
         f"- Cues: {report['cue_count']}",
+        f"- Sentences: {report.get('sentences', report['cue_count'])}",
+        f"- Mean sentence duration: {report.get('mean_sentence_s', 0.0):.3f}s",
+        f"- Max sentence duration: {report.get('max_sentence_s', 0.0):.3f}s",
+        f"- Three-line cues: {report.get('three_line_cues', 0)}",
         f"- Average duration: {report['average_duration']:.3f}s",
         f"- Under one second: {len(report['under_one_second'])}",
         f"- CPS target: {report['cps_target']:.2f}",
@@ -125,8 +151,9 @@ def analyze_layout(
     bands = []
     conflicts = []
     for index, cue in enumerate(cues, start=1):
-        line_count = _ass_text(cue.display_text, max_chars).count(r"\N") + 1
-        text_height = font_size * line_count
+        lines, used_font = layout_cue_lines(cue.display_text, max_chars, font_size)
+        line_count = len(lines)
+        text_height = used_font * line_count
         if alignment == 8:
             text_top = margin
             text_bottom = margin + text_height
@@ -135,7 +162,7 @@ def analyze_layout(
             text_top = text_bottom - text_height
         band = {
             "cue": index,
-            "font_size": font_size,
+            "font_size": used_font,
             "line_count": line_count,
             "margin_v": margin,
             "text_band": [text_top, text_bottom],

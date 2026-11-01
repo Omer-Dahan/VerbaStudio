@@ -127,6 +127,24 @@ def test_ass_text_repairs_and_keeps_split_decimal_atomic() -> None:
     assert "26\\N.3" not in rendered
 
 
+def test_three_line_fallback_switches_to_smaller_font_and_keeps_every_word() -> None:
+    words = [f"word{i}" for i in range(9)]
+    text = " ".join(words)
+
+    rendered = _ass_text(text, max_chars=17, font_size=40)
+
+    assert "\\fs36" in rendered
+    assert rendered.count(r"\N") == 2
+    for word in words:
+        assert word in rendered
+
+
+def test_two_line_text_keeps_the_base_font_size() -> None:
+    rendered = _ass_text("word0 word1 word2 word3", max_chars=11, font_size=40)
+
+    assert "\\fs" not in rendered
+
+
 def test_oversized_token_stays_on_its_own_line() -> None:
     token = "Horizon-Minecraft-Java-26.3"
     rendered = _ass_text(f"לפני {token} אחרי", max_chars=10)

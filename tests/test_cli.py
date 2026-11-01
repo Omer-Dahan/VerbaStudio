@@ -16,6 +16,8 @@ from hs.cli import (
 )
 from hs.burn import BurnResult
 from hs.models import Cue, Word
+from hs.cues import enforce_reading_speed
+from hs.cues import normalize_sentence_cues
 
 
 @pytest.fixture(autouse=True)
@@ -277,6 +279,41 @@ def test_asr_model_is_released_before_translation_client_is_constructed(
     assert released is True
 
 
+def test_cue_style_defaults_to_sentences_and_words_reproduces_prior_behaviour(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.touch()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    word = Word(0, 1, "hello")
+    fake_report = {
+        "cps_violations": [], "forced_cues": [], "silence_overlaps": [],
+        "translation_failures": [], "passthrough": 0, "boundary_issues": [],
+    }
+
+    with (
+        patch("hs.cli.probe_video", return_value={"width": 1, "height": 1, "duration": 2.0}),
+        patch("hs.cli.has_audio_stream", return_value=True),
+        patch("hs.cli.extract_audio"),
+        patch("hs.cli.transcribe", return_value=([word], "en")),
+        patch("hs.cli.TranslationClient.translate_cues"),
+        patch("hs.cli.build_report", return_value=fake_report),
+        patch("hs.cli.write_report"),
+        patch("hs.cli.enforce_reading_speed", wraps=enforce_reading_speed) as words_path,
+        patch("hs.cli.normalize_sentence_cues", wraps=normalize_sentence_cues) as sentences_path,
+    ):
+        assert main([str(video), "--dry-run", "--cue-style", "words"]) == 0
+        assert words_path.called
+        assert not sentences_path.called
+
+        words_path.reset_mock()
+        sentences_path.reset_mock()
+
+        assert main([str(video), "--dry-run"]) == 0
+        assert sentences_path.called
+        assert not words_path.called
+
+
 def test_no_audio_stream_returns_exit_three(tmp_path: Path) -> None:
     video = tmp_path / "silent.mp4"
     video.touch()
@@ -339,7 +376,7 @@ def test_translation_failures_over_threshold_return_exit_five(tmp_path: Path) ->
         patch("hs.cli.segment_words", return_value=[Cue(index, index + 1, "source") for index in range(4)]),
         patch("hs.cli.TranslationClient.translate_cues", side_effect=fail_translation),
     ):
-        assert main([str(video)]) == 5
+        assert main([str(video), "--cue-style", "words"]) == 5
 
 
 def test_exception_details_are_only_logged_in_verbose_mode(
