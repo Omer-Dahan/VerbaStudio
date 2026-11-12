@@ -17,7 +17,6 @@ SUBJECT_PRONOUNS = {"he", "i", "it", "she", "they", "we", "you"}
 
 SENTENCE_TERMINATOR = re.compile(r"[.!?…][\"'”’)]*$")
 MIN_SENTENCE_DURATION = 1.2
-SENTENCE_PAUSE_GAP = 0.40
 MAX_SENTENCE_DURATION = 14.0
 MAX_SENTENCE_CHARS = 180
 
@@ -29,6 +28,7 @@ def segment_sentences(words: list[Word]) -> list[Cue]:
     groups = _split_into_sentences(words)
     groups = [part for group in groups for part in _split_oversized_sentence(group)]
     groups = _merge_short_sentences(groups)
+    groups = _merge_punctuation_only_groups(groups)
     return [
         Cue(start=group[0].start, end=group[-1].end, source=_join_words(group), words=group)
         for group in groups
@@ -43,9 +43,7 @@ def _split_into_sentences(words: list[Word]) -> list[list[Word]]:
         duration = current[-1].end - current[0].start
         if duration < MIN_SENTENCE_DURATION:
             continue
-        is_last = index == len(words) - 1
-        gap = None if is_last else words[index + 1].start - word.end
-        if SENTENCE_TERMINATOR.search(word.text) or (gap is not None and gap >= SENTENCE_PAUSE_GAP):
+        if SENTENCE_TERMINATOR.search(word.text):
             groups.append(current)
             current = []
     if current:
@@ -100,6 +98,20 @@ def _merge_short_sentences(groups: list[list[Word]]) -> list[list[Word]]:
                 continue
         merged.append(group)
         index += 1
+    return merged
+
+
+def _merge_punctuation_only_groups(groups: list[list[Word]]) -> list[list[Word]]:
+    merged: list[list[Word]] = []
+    leading: list[Word] = []
+    for group in groups:
+        if LETTER.search(_join_words(group)):
+            merged.append([*leading, *group])
+            leading = []
+        elif merged:
+            merged[-1].extend(group)
+        else:
+            leading.extend(group)
     return merged
 
 

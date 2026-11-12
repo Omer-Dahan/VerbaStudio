@@ -153,27 +153,26 @@ def test_merged_fragment_splits_at_word_boundary_to_fit_line_budget() -> None:
 
 
 def test_sentence_segmenter_closes_on_terminal_punctuation_once_minimum_duration_reached() -> None:
-    words = make_words(["This", "is", "one", "sentence.", "This", "is", "two."])
+    words = make_words(["Try", "again.", "Ask", "the", "women?"], step=0.85)
 
     cues = segment_sentences(words)
 
-    assert [cue.source for cue in cues] == ["This is one sentence.", "This is two."]
+    assert [cue.source for cue in cues] == ["Try again.", "Ask the women?"]
     assert cues[0].start == words[0].start
-    assert cues[0].end == words[3].end
+    assert cues[0].end == words[1].end
     assert cues[0].end - cues[0].start >= 1.2
-    assert cues[1].start == words[4].start
+    assert cues[1].start == words[2].start
     assert cues[1].end == words[-1].end
 
 
-def test_sentence_segmenter_closes_on_long_pause_without_punctuation() -> None:
+def test_sentence_segmenter_does_not_close_on_pause_without_punctuation() -> None:
     words = make_words(
         ["one", "two", "three", "four", "five", "six"], gap_after={2: 0.45}
     )
 
     cues = segment_sentences(words)
 
-    assert [cue.source for cue in cues] == ["one two three", "four five six"]
-    assert cues[1].start - cues[0].end >= 0.40
+    assert [cue.source for cue in cues] == ["one two three four five six"]
 
 
 def test_sentence_shorter_than_minimum_merges_into_following_sentence() -> None:
@@ -196,14 +195,16 @@ def test_sentence_segmenter_preserves_every_word_across_boundaries() -> None:
     assert " ".join(cue.source for cue in cues) == " ".join(word.text for word in words)
 
 
-def test_long_sentence_without_pauses_is_capped_at_the_largest_internal_gap() -> None:
-    words = make_words([f"word{i}" for i in range(40)], gap_after={20: 0.25})
+def test_long_sentence_splits_at_largest_pause_and_tail_keeps_terminator() -> None:
+    words = make_words([*[f"word{i}" for i in range(39)], "last?"], gap_after={20: 0.25})
 
     cues = segment_sentences(words)
 
     assert len(cues) == 2
     assert cues[0].words[-1] is words[20]
     assert cues[1].words[0] is words[21]
+    assert cues[-1].words[-1].text == "last?"
+    assert cues[-1].source.endswith("last?")
     assert all(cue.end - cue.start <= 14.0 for cue in cues)
     assert [word for cue in cues for word in cue.words] == words
 
@@ -220,6 +221,15 @@ def test_long_sentence_with_no_internal_pause_is_capped_at_the_duration_limit() 
 
 def test_segment_sentences_returns_empty_for_no_words() -> None:
     assert segment_sentences([]) == []
+
+
+def test_sentence_segmenter_never_emits_punctuation_only_cue() -> None:
+    words = make_words(["This", "ends", ".", "Another", "ends", "?"])
+
+    cues = segment_sentences(words)
+
+    assert [cue.source for cue in cues] == ["This ends.", "Another ends?"]
+    assert all(any(character.isalpha() for character in cue.source) for cue in cues)
 
 
 def _wrap_source(text: str, max_chars: int) -> list[str]:
