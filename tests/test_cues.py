@@ -9,6 +9,7 @@ from hs.cues import (
     enforce_reading_speed,
     extend_clause_durations,
     normalize_cues,
+    normalize_clause_cues,
     word_sequence_is_complete,
 )
 from hs.models import Cue, Word
@@ -299,6 +300,46 @@ def test_short_cue_is_never_dropped_by_normalizer() -> None:
     cue = Cue(1.0, 1.1, "brief", "קצר")
 
     assert normalize_cues([cue], min_cue_duration=0.40) == [cue]
+
+
+def test_short_clause_extends_into_following_gap() -> None:
+    cues = [
+        Cue(0.0, 0.4, "one two three", "אחת שתיים שלוש"),
+        Cue(2.4, 4.0, "four five six", "ארבע חמש שש"),
+    ]
+
+    normalized = normalize_clause_cues(cues, minimum=1.5, max_chars=20)
+
+    assert len(normalized) == 2
+    assert normalized[0].end == pytest.approx(1.5)
+    assert normalized[1].start == pytest.approx(2.4)
+
+
+def test_short_clause_without_gap_merges_forward() -> None:
+    cues = [
+        Cue(0.0, 0.4, "one two three", "אחת שתיים שלוש"),
+        Cue(0.4, 2.0, "four five six", "ארבע חמש שש"),
+    ]
+
+    normalized = normalize_clause_cues(cues, minimum=1.5, max_chars=20)
+
+    assert len(normalized) == 1
+    assert normalized[0].start == 0.0
+    assert normalized[0].end == 2.0
+
+
+def test_short_clause_merges_backward_when_forward_text_exceeds_two_lines() -> None:
+    cues = [
+        Cue(0.0, 1.5, "one two three", "פתיח קצר"),
+        Cue(1.5, 1.9, "four five six", "קטע קצר"),
+        Cue(1.9, 3.9, "seven eight nine", "מילים ארוכות מאוד שלא ייכנסו קדימה"),
+    ]
+
+    normalized = normalize_clause_cues(cues, minimum=1.5, max_chars=10)
+
+    assert len(normalized) == 2
+    assert normalized[0].display_text == "פתיח קצר קטע קצר"
+    assert normalized[0].end == 1.9
 
 
 def test_long_translated_cue_is_split_to_at_most_two_lines() -> None:

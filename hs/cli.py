@@ -18,9 +18,10 @@ from hs.cues import (
     adaptive_cps_target,
     characters_per_second,
     enforce_reading_speed,
-    normalize_cues,
-    normalize_sentence_cues,
     extend_clause_durations,
+    normalize_cues,
+    normalize_clause_cues,
+    normalize_sentence_cues,
     word_sequence_is_complete,
 )
 from hs.qa import build_report, write_report
@@ -312,8 +313,13 @@ def _run(
     manifest["secs"]["translate"] = round(time.perf_counter() - translate_started, 3)
     _progress(args.progress, "translate")
     clause_split_fallback = 0
+    effective_minimum = args.min_cue_duration
     if args.cue_style == "clauses":
-        cues, clause_split_fallback = _display_clause_cues(cues, sentence_clauses, max_chars)
+        effective_minimum = args.min_cue_duration if args.min_cue_duration_explicit else 1.5
+        cues, clause_split_fallback = _display_clause_cues(
+            cues, sentence_clauses, max_chars, effective_minimum
+        )
+        cues = extend_clause_durations(cues, effective_minimum)
     cps_target = adaptive_cps_target(cues, float(metadata["duration"]))
     if args.cue_style == "words":
         cues = enforce_reading_speed(
@@ -325,10 +331,7 @@ def _run(
     elif args.cue_style == "sentences":
         cues = normalize_sentence_cues(cues)
     else:
-        minimum = args.min_cue_duration
-        if not args.min_cue_duration_explicit:
-            minimum = 1.5
-        cues = extend_clause_durations(normalize_sentence_cues(cues), minimum)
+        cues = normalize_sentence_cues(cues)
     manifest["no_word_loss"] = word_sequence_is_complete(cues, words)
     if not manifest["no_word_loss"]:
         raise PipelineError("Cue normalization lost or duplicated transcript words", 7)
@@ -363,6 +366,7 @@ def _run(
         args.margin_v,
         args.cue_style,
         clause_split_fallback,
+        effective_minimum,
     )
     write_report(report, qa_json, qa_markdown)
 
@@ -375,6 +379,9 @@ def _run(
     manifest["cue_style"] = args.cue_style
     manifest["clauses"] = len(cues) if args.cue_style == "clauses" else 0
     manifest["clause_split_fallback"] = clause_split_fallback
+    manifest["cues_below_min"] = sum(
+        cue.end - cue.start < effective_minimum for cue in cues
+    )
     manifest["cps_max"] = round(max((characters_per_second(cue) for cue in cues), default=0.0), 2)
     manifest["cps_target"] = round(cps_target, 2)
     manifest["qa"] = {
@@ -430,6 +437,7 @@ def _run(
                     "cue_style": manifest["cue_style"],
                     "clauses": manifest["clauses"],
                     "clause_split_fallback": manifest["clause_split_fallback"],
+                    "cues_below_min": manifest["cues_below_min"],
                 },
                 "transcript": " ".join(word.text for cue in cues for word in cue.words),
                 "cue_source": " ".join(cue.source for cue in cues),
@@ -493,7 +501,10 @@ def _matches_known_output(video: Path) -> bool:
 
 
 def _display_clause_cues(
-    sentences: list[Cue], sentence_clauses: list[list[Cue]], max_chars: int = 42
+    sentences: list[Cue],
+    sentence_clauses: list[list[Cue]],
+    max_chars: int = 42,
+    minimum: float = 1.5,
 ) -> tuple[list[Cue], int]:
     displayed: list[Cue] = []
     fallbacks = 0
@@ -520,6 +531,7 @@ def _display_clause_cues(
             fallbacks += 1
             continue
         assert " ".join(pieces) == translated
+        sentence_display: list[Cue] = []
         for clause, piece in zip(clauses, pieces, strict=True):
             clause.text = piece
             clause.translation_failed = sentence.translation_failed
@@ -527,7 +539,8 @@ def _display_clause_cues(
             clause.translation_outcome = sentence.translation_outcome
             clause.translation_attempts = sentence.translation_attempts
             clause.translation_retried = sentence.translation_retried
-            displayed.append(clause)
+            sentence_display.append(clause)
+        displayed.extend(normalize_clause_cues(sentence_display, minimum, max_chars))
     return displayed, fallbacks
 
 
@@ -571,6 +584,7 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
         "cue_style": args.cue_style,
         "clauses": 0,
         "clause_split_fallback": 0,
+        "cues_below_min": 0,
         "cps_max": 0.0,
         "cps_target": 17.0,
         "no_word_loss": False,

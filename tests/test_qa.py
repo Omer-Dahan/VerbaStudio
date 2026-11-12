@@ -46,6 +46,17 @@ def test_report_separates_failures_from_passthrough_cues(tmp_path, monkeypatch) 
     assert report["passthrough"] == 1
 
 
+def test_report_counts_only_cues_below_configured_minimum(tmp_path, monkeypatch) -> None:
+    cues = [Cue(0.0, 1.5, "long enough"), Cue(1.5, 2.4, "whole short sentence")]
+    monkeypatch.setattr("hs.qa.detect_silences", lambda *_args: [])
+
+    report = build_report(
+        cues, tmp_path / "video.mp4", 2.4, min_cue_duration=1.5
+    )
+
+    assert report["cues_below_min"] == 1
+
+
 def test_adaptive_cps_target_stays_at_floor_for_normal_speech() -> None:
     cues = [Cue(0.0, 2.0, "A normal sentence")]
 

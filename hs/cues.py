@@ -155,6 +155,31 @@ def extend_clause_durations(cues: list[Cue], minimum: float = 1.5) -> list[Cue]:
     return extended
 
 
+def normalize_clause_cues(
+    cues: list[Cue], minimum: float = 1.5, max_chars: int = 42
+) -> list[Cue]:
+    normalized = extend_clause_durations(cues, minimum)
+    index = 0
+    while index < len(normalized):
+        cue = normalized[index]
+        if cue.end - cue.start >= minimum or len(normalized) == 1:
+            index += 1
+            continue
+
+        if index + 1 < len(normalized):
+            forward = _merge_pair(cue, normalized[index + 1])
+            if _fits_line_budget(forward.display_text, max_chars) or index == 0:
+                normalized[index : index + 2] = [forward]
+                continue
+
+        normalized[index - 1 : index + 1] = [
+            _merge_pair(normalized[index - 1], cue)
+        ]
+        index = max(0, index - 1)
+
+    return normalized
+
+
 def normalize_cues(cues: list[Cue], min_cue_duration: float = 0.40) -> list[Cue]:
     deduplicated: list[Cue] = []
     for cue in cues:

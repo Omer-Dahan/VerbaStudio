@@ -38,6 +38,11 @@ RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
 RELOAD_RECOVERY_SECONDS = 180.0
 HEALTH_POLL_SECONDS = 5.0
 HEBREW_BOUNDARY = re.compile(r"[,;:?!\.…][\"'”’)]*$")
+WEAK_END_TOKENS = {
+    "אל", "על", "עם", "של", "את", "לי", "לו", "לה", "מן", "כי",
+    "אם", "אשר", "כמו", "או", "גם", "רק", "לא",
+}
+SEPARATE_PREFIXES = {"ב", "ל", "מ", "ה", "ו", "כ", "ש"}
 
 
 class PermanentTranslationError(RuntimeError):
@@ -52,28 +57,28 @@ def split_translation(text: str, piece_count: int) -> list[str] | None:
         return [text]
 
     words = text.split(" ")
-    minimum = 1 if len(words) < 2 else 2
-    if len(words) < piece_count * minimum:
+    if len(words) < piece_count + 1:
         return None
 
     boundaries: list[int] = []
     previous = 0
     for piece_index in range(1, piece_count):
         pieces_left = piece_count - piece_index
-        low = previous + minimum
-        high = len(words) - pieces_left * minimum
+        low = previous + 1
+        high = len(words) - pieces_left
         target = len(words) * piece_index / piece_count
         punctuation = [
             index
             for index in range(low, high + 1)
             if HEBREW_BOUNDARY.search(words[index - 1])
         ]
-        nearby_punctuation = [
+        strong_spaces = [
             index
-            for index in punctuation
-            if abs(index - target) <= len(words) / piece_count / 2
+            for index in range(low, high + 1)
+            if words[index - 1] not in WEAK_END_TOKENS
+            and words[index] not in SEPARATE_PREFIXES
         ]
-        candidates = nearby_punctuation or list(range(low, high + 1))
+        candidates = punctuation or strong_spaces or list(range(low, high + 1))
         boundary = min(candidates, key=lambda index: abs(index - target))
         boundaries.append(boundary)
         previous = boundary

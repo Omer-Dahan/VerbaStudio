@@ -54,8 +54,28 @@ def test_hebrew_clause_split_uses_nearest_proportional_space() -> None:
     assert pieces == ["אחד שני שלושה ארבעה", "חמישה שישה שבעה שמונה"]
 
 
+def test_hebrew_clause_split_avoids_weak_end_tokens_when_possible() -> None:
+    sentence = "למה לעזאזל בכלל התחלתי לצאת שוב עם האדם הזה היום"
+
+    pieces = split_translation(sentence, 3)
+
+    assert pieces is not None
+    assert " ".join(pieces) == sentence
+    assert all(piece.split()[-1] not in {"אל", "על", "עם", "של", "את", "לי", "לו", "לה", "מן", "כי", "אם", "אשר", "כמו", "או", "גם", "רק", "לא"} for piece in pieces[:-1])
+
+
+def test_hebrew_clause_split_avoids_separate_prefix_at_piece_start() -> None:
+    sentence = "זה משפט ארוך ב מקרה שבו קיימת חלופה טובה יותר"
+
+    pieces = split_translation(sentence, 2)
+
+    assert pieces is not None
+    assert pieces[1].split()[0] not in {"ב", "ל", "מ", "ה", "ו", "כ", "ש"}
+    assert " ".join(pieces) == sentence
+
+
 def test_hebrew_clause_split_returns_none_when_minimum_words_are_impossible() -> None:
-    assert split_translation("מעט מדי מילים", 2) is None
+    assert split_translation("מעט מילים", 2) is None
 
 
 def test_prompt_template_instructs_to_keep_ellipses() -> None:

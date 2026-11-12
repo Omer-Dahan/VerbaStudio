@@ -186,7 +186,7 @@ def test_json_success_is_parseable_and_has_required_shape(
         "cue_count", "cps_max", "cps_target", "qa", "secs", "exit",
         "no_word_loss", "size_mb", "downscaled", "quality_floor_hit",
         "existing_captions", "persisted", "artifacts",
-        "cue_style", "clauses", "clause_split_fallback",
+        "cue_style", "clauses", "clause_split_fallback", "cues_below_min",
     }
     assert manifest["persisted"] is False
     assert manifest["artifacts"] == []
@@ -327,7 +327,7 @@ def test_cue_style_defaults_to_sentences_and_words_reproduces_prior_behaviour(
 
 def test_impossible_clause_translation_split_records_fallback() -> None:
     words = [Word(0, 0.5, "one"), Word(0.6, 1.0, "two"), Word(1.1, 1.5, "three")]
-    sentence = Cue(0, 1.5, "one two three", "מעט מדי מילים", words)
+    sentence = Cue(0, 1.5, "one two three", "מעט מילים", words)
     clauses = [
         Cue(0, 0.5, "one", words=[words[0]]),
         Cue(0.6, 1.5, "two three", words=words[1:]),
