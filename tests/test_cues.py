@@ -315,6 +315,15 @@ def test_short_clause_extends_into_following_gap() -> None:
     assert normalized[1].start == pytest.approx(2.4)
 
 
+def test_short_clause_stays_word_aligned_when_minimum_is_disabled() -> None:
+    cue = Cue(1.0, 1.4, "one two", "אחת שתיים")
+
+    normalized = normalize_clause_cues([cue], minimum=0, max_chars=20)
+
+    assert normalized == [cue]
+    assert normalized[0].end - normalized[0].start == pytest.approx(0.4)
+
+
 def test_short_clause_without_gap_merges_forward() -> None:
     cues = [
         Cue(0.0, 0.4, "one two three", "אחת שתיים שלוש"),
@@ -328,7 +337,7 @@ def test_short_clause_without_gap_merges_forward() -> None:
     assert normalized[0].end == 2.0
 
 
-def test_short_clause_merges_backward_when_forward_text_exceeds_two_lines() -> None:
+def test_short_clause_merges_forward_even_when_text_exceeds_two_lines() -> None:
     cues = [
         Cue(0.0, 1.5, "one two three", "פתיח קצר"),
         Cue(1.5, 1.9, "four five six", "קטע קצר"),
@@ -338,8 +347,9 @@ def test_short_clause_merges_backward_when_forward_text_exceeds_two_lines() -> N
     normalized = normalize_clause_cues(cues, minimum=1.5, max_chars=10)
 
     assert len(normalized) == 2
-    assert normalized[0].display_text == "פתיח קצר קטע קצר"
-    assert normalized[0].end == 1.9
+    assert normalized[0].display_text == "פתיח קצר"
+    assert normalized[1].display_text == "קטע קצר מילים ארוכות מאוד שלא ייכנסו קדימה"
+    assert normalized[1].end == 3.9
 
 
 def test_long_translated_cue_is_split_to_at_most_two_lines() -> None:

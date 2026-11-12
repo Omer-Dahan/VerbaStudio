@@ -61,6 +61,60 @@ def split_sentence_clauses(sentence: Cue, max_chars: int = 42) -> list[Cue]:
     ]
 
 
+def split_clause_by_word_limit(cue: Cue, max_words: int) -> list[Cue]:
+    if max_words <= 0 or len(cue.words) <= max_words:
+        return [cue]
+
+    split_at = max(
+        range(1, len(cue.words)),
+        key=lambda index: (
+            cue.words[index].start - cue.words[index - 1].end,
+            -abs(index - len(cue.words) / 2),
+        ),
+    )
+    left, right = _split_clause_at(cue, split_at)
+    return [
+        *split_clause_by_word_limit(left, max_words),
+        *split_clause_by_word_limit(right, max_words),
+    ]
+
+
+def _split_clause_at(cue: Cue, split_at: int) -> tuple[Cue, Cue]:
+    left_words = cue.words[:split_at]
+    right_words = cue.words[split_at:]
+    text_tokens = cue.text.split() if cue.text is not None else []
+    text_split = (
+        min(
+            len(text_tokens) - 1,
+            max(1, round(len(text_tokens) * split_at / len(cue.words))),
+        )
+        if len(text_tokens) > 1
+        else len(text_tokens)
+    )
+
+    def piece(words: list[Word], source: str, text: str | None) -> Cue:
+        return Cue(
+            start=words[0].start,
+            end=words[-1].end,
+            source=source,
+            text=text,
+            words=words,
+            translation_failed=cue.translation_failed,
+            translation_passthrough=cue.translation_passthrough,
+            translation_outcome=cue.translation_outcome,
+            translation_attempts=cue.translation_attempts,
+            translation_retried=cue.translation_retried,
+            cps_forced=cue.cps_forced,
+        )
+
+    left_text = " ".join(text_tokens[:text_split]) if cue.text is not None else None
+    right_text = " ".join(text_tokens[text_split:]) if cue.text is not None else None
+    return (
+        piece(left_words, _join_words(left_words), left_text),
+        piece(right_words, _join_words(right_words), right_text),
+    )
+
+
 def _clause_groups(words: list[Word]) -> list[list[Word]]:
     if len(words) <= CLAUSE_MAX_WORDS:
         return [words]

@@ -8,7 +8,7 @@ import time
 import subprocess
 from pathlib import Path
 
-from hs.ass import DEFAULT_FONT, layout_cue_lines, subtitle_geometry, write_ass
+from hs.ass import DEFAULT_FONT, subtitle_geometry, write_ass
 from hs.audio import extract_audio, has_audio_stream, probe_video
 from hs.burn import burn_subtitles, encoding_decisions
 from hs.cache import cache_key, restore_cache, store_cache
@@ -18,14 +18,18 @@ from hs.cues import (
     adaptive_cps_target,
     characters_per_second,
     enforce_reading_speed,
-    extend_clause_durations,
     normalize_cues,
     normalize_clause_cues,
     normalize_sentence_cues,
     word_sequence_is_complete,
 )
 from hs.qa import build_report, write_report
-from hs.segment import segment_sentences, segment_words, split_sentence_clauses
+from hs.segment import (
+    segment_sentences,
+    segment_words,
+    split_clause_by_word_limit,
+    split_sentence_clauses,
+)
 from hs.srt import write_srt
 from hs.transcribe import DEFAULT_MODEL, transcribe
 from hs.translate import (
@@ -144,6 +148,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("sentences", "clauses", "words"),
         default="sentences",
         help="Sentence translation with sentence (default), clause, or legacy word cues",
+    )
+    parser.add_argument(
+        "--cue-min-seconds",
+        type=_nonnegative_float,
+        default=0,
+        help="Minimum clause cue duration; 0 disables extension and merging (default: 0)",
+    )
+    parser.add_argument(
+        "--max-cue-words",
+        type=_nonnegative_int,
+        default=0,
+        help="Maximum words per clause cue; 0 disables this limit (default: 0)",
     )
     return parser
 
@@ -313,13 +329,21 @@ def _run(
     manifest["secs"]["translate"] = round(time.perf_counter() - translate_started, 3)
     _progress(args.progress, "translate")
     clause_split_fallback = 0
-    effective_minimum = args.min_cue_duration
+    effective_minimum = (
+        args.cue_min_seconds
+        if args.cue_style == "clauses"
+        else args.min_cue_duration
+    )
     if args.cue_style == "clauses":
-        effective_minimum = args.min_cue_duration if args.min_cue_duration_explicit else 1.5
         cues, clause_split_fallback = _display_clause_cues(
-            cues, sentence_clauses, max_chars, effective_minimum
+            cues, sentence_clauses, max_chars
         )
-        cues = extend_clause_durations(cues, effective_minimum)
+        cues = normalize_clause_cues(cues, effective_minimum, max_chars)
+        cues = [
+            piece
+            for cue in cues
+            for piece in split_clause_by_word_limit(cue, args.max_cue_words)
+        ]
     cps_target = adaptive_cps_target(cues, float(metadata["duration"]))
     if args.cue_style == "words":
         cues = enforce_reading_speed(
@@ -504,34 +528,17 @@ def _display_clause_cues(
     sentences: list[Cue],
     sentence_clauses: list[list[Cue]],
     max_chars: int = 42,
-    minimum: float = 1.5,
 ) -> tuple[list[Cue], int]:
     displayed: list[Cue] = []
     fallbacks = 0
     for sentence, clauses in zip(sentences, sentence_clauses, strict=True):
         translated = sentence.display_text
         pieces = split_translation(translated, len(clauses))
-        while pieces is not None:
-            overflow = next(
-                (
-                    index
-                    for index, piece in enumerate(pieces)
-                    if len(layout_cue_lines(piece, max_chars)[0]) > 2
-                    and len(clauses[index].words) >= 4
-                ),
-                None,
-            )
-            if overflow is None:
-                break
-            replacement = _split_clause_once(clauses[overflow])
-            clauses[overflow : overflow + 1] = replacement
-            pieces = split_translation(translated, len(clauses))
         if pieces is None:
             displayed.append(sentence)
             fallbacks += 1
             continue
         assert " ".join(pieces) == translated
-        sentence_display: list[Cue] = []
         for clause, piece in zip(clauses, pieces, strict=True):
             clause.text = piece
             clause.translation_failed = sentence.translation_failed
@@ -539,25 +546,8 @@ def _display_clause_cues(
             clause.translation_outcome = sentence.translation_outcome
             clause.translation_attempts = sentence.translation_attempts
             clause.translation_retried = sentence.translation_retried
-            sentence_display.append(clause)
-        displayed.extend(normalize_clause_cues(sentence_display, minimum, max_chars))
+            displayed.append(clause)
     return displayed, fallbacks
-
-
-def _split_clause_once(cue: Cue) -> list[Cue]:
-    candidates = range(2, len(cue.words) - 1)
-    split_at = max(
-        candidates,
-        key=lambda index: (
-            cue.words[index].start - cue.words[index - 1].end,
-            -abs(index - len(cue.words) / 2),
-        ),
-    )
-    groups = (cue.words[:split_at], cue.words[split_at:])
-    return [
-        Cue(group[0].start, group[-1].end, " ".join(word.text for word in group), words=group)
-        for group in groups
-    ]
 
 
 def _file_digest(path: Path) -> bytes:
@@ -636,6 +626,8 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "gender": args.gender,
         "strict": args.strict,
         "min_cue_duration": args.min_cue_duration,
+        "cue_min_seconds": args.cue_min_seconds,
+        "max_cue_words": args.max_cue_words,
         "max_size_mb": args.max_size_mb,
         "cue_style": args.cue_style,
     }

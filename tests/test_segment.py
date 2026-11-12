@@ -1,5 +1,10 @@
-from hs.models import Word
-from hs.segment import segment_clauses, segment_sentences, segment_words
+from hs.models import Cue, Word
+from hs.segment import (
+    segment_clauses,
+    segment_sentences,
+    segment_words,
+    split_clause_by_word_limit,
+)
 
 
 def make_words(texts: list[str], step: float = 0.45, gap_after: dict[int, float] | None = None):
@@ -44,6 +49,26 @@ def test_two_hundred_words_respect_duration_and_word_boundaries() -> None:
     assert flattened == words
     assert all(cue.end - cue.start <= 7.0 for cue in cues)
     assert all(cue.start == cue.words[0].start and cue.end == cue.words[-1].end for cue in cues)
+
+
+def test_max_cue_words_splits_at_pauses_without_losing_words() -> None:
+    words = make_words(
+        [f"word{i}" for i in range(24)],
+        gap_after={5: 0.8, 14: 1.2, 19: 0.6},
+    )
+    cue = Cue(
+        words[0].start,
+        words[-1].end,
+        " ".join(word.text for word in words),
+        words=words,
+    )
+
+    pieces = split_clause_by_word_limit(cue, 10)
+
+    assert [len(piece.words) for piece in pieces] == [6, 9, 9]
+    assert [word for piece in pieces for word in piece.words] == words
+    assert all(piece.start == piece.words[0].start for piece in pieces)
+    assert all(piece.end == piece.words[-1].end for piece in pieces)
 
 
 def test_segmenter_preserves_every_source_word_when_line_limits_split() -> None:

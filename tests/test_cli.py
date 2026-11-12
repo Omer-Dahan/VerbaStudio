@@ -43,16 +43,29 @@ def test_defaults_fit_sixteen_gigabyte_gpu() -> None:
     assert args.box_alpha == 0.55
     assert args.outline == 2.0
     assert args.min_cue_duration == 0.40
+    assert args.cue_min_seconds == 0
+    assert args.max_cue_words == 0
     assert args.max_size_mb == 9.0
     assert "fits 16GB" in " ".join(build_parser().format_help().split())
 
 
 def test_clause_style_and_ignore_caption_band_parse() -> None:
     args = build_parser().parse_args(
-        ["source.mp4", "--cue-style", "clauses", "--ignore-caption-band"]
+        [
+            "source.mp4",
+            "--cue-style",
+            "clauses",
+            "--cue-min-seconds",
+            "1.5",
+            "--max-cue-words",
+            "10",
+            "--ignore-caption-band",
+        ]
     )
 
     assert args.cue_style == "clauses"
+    assert args.cue_min_seconds == 1.5
+    assert args.max_cue_words == 10
     assert args.ignore_caption_band is True
 
 
@@ -337,6 +350,37 @@ def test_impossible_clause_translation_split_records_fallback() -> None:
 
     assert displayed == [sentence]
     assert fallback_count == 1
+
+
+def test_clause_translation_does_not_create_extra_source_clauses() -> None:
+    words = [Word(index * 0.5, index * 0.5 + 0.4, f"word{index}") for index in range(6)]
+    sentence = Cue(
+        words[0].start,
+        words[-1].end,
+        " ".join(word.text for word in words),
+        " ".join(["מילהארוכה"] * 12),
+        words,
+    )
+    clauses = [
+        Cue(
+            words[0].start,
+            words[2].end,
+            " ".join(word.text for word in words[:3]),
+            words=words[:3],
+        ),
+        Cue(
+            words[3].start,
+            words[-1].end,
+            " ".join(word.text for word in words[3:]),
+            words=words[3:],
+        ),
+    ]
+
+    displayed, fallback_count = _display_clause_cues([sentence], [clauses], max_chars=10)
+
+    assert len(displayed) == 2
+    assert [word for cue in displayed for word in cue.words] == words
+    assert fallback_count == 0
 
 
 def test_explicit_margin_layout_conflict_is_reported_but_does_not_fail(
