@@ -17,6 +17,7 @@ from hs.models import Cue
 from hs.cues import (
     adaptive_cps_target,
     characters_per_second,
+    clamp_sentence_cps,
     enforce_reading_speed,
     normalize_cues,
     normalize_clause_cues,
@@ -345,9 +346,10 @@ def _run(
         if args.cue_style == "clauses"
         else args.min_cue_duration
     )
+    cps_target = adaptive_cps_target(cues, float(metadata["duration"]))
     if args.cue_style == "clauses":
         cues, clause_split_fallback = _display_clause_cues(
-            cues, sentence_clauses, max_chars, args.min_cue_words
+            cues, sentence_clauses, max_chars, args.min_cue_words, cps_target
         )
         cues = normalize_clause_cues(cues, effective_minimum, max_chars)
         cues = [
@@ -355,7 +357,6 @@ def _run(
             for cue in cues
             for piece in split_clause_by_word_limit(cue, args.max_cue_words)
         ]
-    cps_target = adaptive_cps_target(cues, float(metadata["duration"]))
     if args.cue_style == "words":
         cues = enforce_reading_speed(
             normalize_cues(cues, min_cue_duration=args.min_cue_duration),
@@ -547,12 +548,14 @@ def _display_clause_cues(
     sentence_clauses: list[list[Cue]],
     max_chars: int = 42,
     min_words: int = 2,
+    cps_target: float = 17.0,
 ) -> tuple[list[Cue], int]:
     displayed: list[Cue] = []
     fallbacks = 0
     for sentence, clauses in zip(sentences, sentence_clauses, strict=True):
         translated = sentence.display_text
-        pieces = split_translation(translated, len(clauses))
+        weights = [len(clause.source) for clause in clauses]
+        pieces = split_translation(translated, len(clauses), weights)
         if pieces is None:
             displayed.append(sentence)
             fallbacks += 1
@@ -567,9 +570,8 @@ def _display_clause_cues(
             clause.translation_attempts = sentence.translation_attempts
             clause.translation_retried = sentence.translation_retried
             sentence_display.append(clause)
-        displayed.extend(
-            merge_cues_below_min_words(sentence_display, min_words, max_chars)
-        )
+        merged = merge_cues_below_min_words(sentence_display, min_words, max_chars)
+        displayed.extend(clamp_sentence_cps(merged, cps_target))
     return displayed, fallbacks
 
 

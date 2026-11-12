@@ -6,6 +6,7 @@ import pytest
 from hs.ass import _ass_text
 from hs.cues import (
     characters_per_second,
+    clamp_sentence_cps,
     enforce_reading_speed,
     extend_clause_durations,
     normalize_cues,
@@ -362,3 +363,64 @@ def test_long_translated_cue_is_split_to_at_most_two_lines() -> None:
 
     assert " ".join(part.display_text for part in output) == translated
     assert max(line_counts) <= 2
+
+
+def test_clamp_sentence_cps_borrows_from_slack_neighbor_to_fix_tiny_clause() -> None:
+    cues = [
+        Cue(0.0, 3.0, "a long calm first clause", "א" * 5),
+        Cue(3.0, 3.42, "ok", "א" * 14),
+        Cue(3.42, 6.42, "a long calm third clause", "א" * 5),
+    ]
+
+    clamped = clamp_sentence_cps(cues, cps_target=17.0)
+
+    assert clamped[0].start == 0.0
+    assert clamped[-1].end == 6.42
+    assert clamped[0].end <= clamped[1].start
+    assert clamped[1].end <= clamped[2].start
+    assert characters_per_second(clamped[1]) <= 17.0 * 1.6 + 1e-6
+    assert clamped[1].end - clamped[1].start > 0.42
+    assert clamped[0].end - clamped[0].start >= 1.0
+    assert clamped[2].end - clamped[2].start >= 1.0
+
+
+def test_clamp_sentence_cps_leaves_cue_untouched_when_neighbors_have_no_slack() -> None:
+    cues = [
+        Cue(0.0, 1.0, "tight first clause", "א" * 3),
+        Cue(1.0, 1.42, "ok", "א" * 14),
+        Cue(1.42, 2.42, "tight third clause", "א" * 3),
+    ]
+
+    clamped = clamp_sentence_cps(cues, cps_target=17.0)
+
+    assert clamped == cues
+
+
+def test_clamp_sentence_cps_never_widens_past_the_sentence_boundary() -> None:
+    cues = [
+        Cue(0.0, 0.42, "ok", "א" * 14),
+        Cue(0.42, 3.42, "a long calm second clause", "א" * 5),
+    ]
+
+    clamped = clamp_sentence_cps(cues, cps_target=17.0)
+
+    assert clamped[0].start == 0.0
+    assert clamped[-1].end == 3.42
+    assert clamped[0].end <= clamped[1].start
+    assert clamped[0].end - clamped[0].start > 0.42
+    assert characters_per_second(clamped[0]) <= 17.0 * 1.6 + 1e-6
+
+
+def test_clamp_sentence_cps_on_last_cue_borrows_without_moving_sentence_end() -> None:
+    cues = [
+        Cue(0.0, 3.0, "a long calm first clause", "א" * 5),
+        Cue(3.0, 3.42, "ok", "א" * 14),
+    ]
+
+    clamped = clamp_sentence_cps(cues, cps_target=17.0)
+
+    assert clamped[0].start == 0.0
+    assert clamped[-1].end == 3.42
+    assert clamped[0].end <= clamped[1].start
+    assert clamped[1].end - clamped[1].start > 0.42
+    assert characters_per_second(clamped[1]) <= 17.0 * 1.6 + 1e-6

@@ -49,7 +49,12 @@ class PermanentTranslationError(RuntimeError):
     pass
 
 
-def split_translation(text: str, piece_count: int) -> list[str] | None:
+PUNCTUATION_TOLERANCE_RATIO = 0.25
+
+
+def split_translation(
+    text: str, piece_count: int, weights: list[float] | None = None
+) -> list[str] | None:
     normalized = " ".join(text.split())
     if normalized != text or piece_count < 1:
         return None
@@ -60,17 +65,25 @@ def split_translation(text: str, piece_count: int) -> list[str] | None:
     if len(words) < piece_count + 1:
         return None
 
+    if weights is None:
+        weights = [1.0] * piece_count
+    total_weight = sum(weights) or float(piece_count)
+    tolerance = PUNCTUATION_TOLERANCE_RATIO * len(words)
+
     boundaries: list[int] = []
     previous = 0
+    cumulative_weight = 0.0
     for piece_index in range(1, piece_count):
         pieces_left = piece_count - piece_index
         low = previous + 1
         high = len(words) - pieces_left
-        target = len(words) * piece_index / piece_count
+        cumulative_weight += weights[piece_index - 1]
+        target = len(words) * cumulative_weight / total_weight
         punctuation = [
             index
             for index in range(low, high + 1)
             if HEBREW_BOUNDARY.search(words[index - 1])
+            and abs(index - target) <= tolerance
         ]
         strong_spaces = [
             index

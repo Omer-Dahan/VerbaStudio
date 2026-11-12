@@ -135,6 +135,60 @@ def adaptive_cps_target(cues: list[Cue], duration: float) -> float:
     return min(24.0, max(17.0, source_cps * 1.05))
 
 
+CPS_CLAMP_RATIO = 1.6
+CPS_CLAMP_MIN_DURATION = 1.0
+CPS_CLAMP_MAX_WIDEN = 0.6
+
+
+def clamp_sentence_cps(cues: list[Cue], cps_target: float) -> list[Cue]:
+    """Widen cues whose CPS is implausibly high by borrowing time from the
+    adjacent cue (within the same sentence) with the most spare duration.
+    Never changes the sentence's overall start/end span.
+    """
+    if len(cues) < 2:
+        return cues
+
+    clamped = list(cues)
+    threshold = cps_target * CPS_CLAMP_RATIO
+    for index, cue in enumerate(clamped):
+        duration = cue.end - cue.start
+        if duration >= CPS_CLAMP_MIN_DURATION:
+            continue
+        cps = characters_per_second(cue)
+        if cps <= threshold:
+            continue
+
+        chars = len(cue.display_text.replace("\n", ""))
+        required = chars / threshold
+        needed = min(required - duration, CPS_CLAMP_MAX_WIDEN)
+        if needed <= 0:
+            continue
+
+        left_slack = 0.0
+        if index > 0:
+            left = clamped[index - 1]
+            left_slack = max(0.0, (left.end - left.start) - CPS_CLAMP_MIN_DURATION)
+        right_slack = 0.0
+        if index + 1 < len(clamped):
+            right = clamped[index + 1]
+            right_slack = max(0.0, (right.end - right.start) - CPS_CLAMP_MIN_DURATION)
+
+        if left_slack <= 0.0 and right_slack <= 0.0:
+            continue
+
+        if left_slack >= right_slack:
+            borrow = min(needed, left_slack)
+            left = clamped[index - 1]
+            clamped[index - 1] = replace(left, end=left.end - borrow)
+            clamped[index] = replace(clamped[index], start=clamped[index].start - borrow)
+        else:
+            borrow = min(needed, right_slack)
+            right = clamped[index + 1]
+            clamped[index + 1] = replace(right, start=right.start + borrow)
+            clamped[index] = replace(clamped[index], end=clamped[index].end + borrow)
+    return clamped
+
+
 def word_sequence_is_complete(cues: list[Cue], transcript: list[Word]) -> bool:
     return [word for cue in cues for word in cue.words] == transcript
 

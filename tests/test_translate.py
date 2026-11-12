@@ -78,6 +78,49 @@ def test_hebrew_clause_split_returns_none_when_minimum_words_are_impossible() ->
     assert split_translation("מעט מילים", 2) is None
 
 
+def test_weighted_split_places_boundaries_near_weight_proportional_positions() -> None:
+    sentence = " ".join(f"מ{index}" for index in range(1, 31))
+
+    pieces = split_translation(sentence, 3, weights=[1.0, 2.0, 3.0])
+
+    assert pieces is not None
+    assert " ".join(pieces) == sentence
+    assert len(pieces[0].split()) == 5
+    assert len(pieces[1].split()) == 10
+    assert len(pieces[2].split()) == 15
+
+
+def test_weighted_split_does_not_overload_the_small_weight_piece() -> None:
+    sentence = " ".join(f"מ{index}" for index in range(1, 21))
+
+    pieces = split_translation(sentence, 2, weights=[0.1, 0.9])
+
+    assert pieces is not None
+    assert " ".join(pieces) == sentence
+    assert len(pieces[0].split()) < 7
+
+
+def test_distant_hebrew_comma_is_ignored_outside_the_tolerance_window() -> None:
+    words = ["מ1", "מ2", "מ3,", *(f"מ{index}" for index in range(4, 21))]
+    sentence = " ".join(words)
+
+    pieces = split_translation(sentence, 2)
+
+    assert pieces is not None
+    assert " ".join(pieces) == sentence
+    assert not pieces[0].endswith(",")
+
+
+def test_weighted_split_join_invariant_holds_with_uneven_weights() -> None:
+    sentence = " ".join(f"מ{index}" for index in range(1, 23))
+
+    pieces = split_translation(sentence, 4, weights=[0.3, 1.1, 0.4, 2.2])
+
+    assert pieces is not None
+    assert len(pieces) == 4
+    assert " ".join(pieces) == sentence
+
+
 def test_prompt_template_instructs_to_keep_ellipses() -> None:
     assert "ellipsis" in PROMPT_TEMPLATE
     assert "..." in PROMPT_TEMPLATE

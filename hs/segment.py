@@ -70,7 +70,7 @@ def merge_cues_below_min_words(
     merged = list(cues)
     index = 0
     while index < len(merged):
-        if len(merged[index].display_text.split()) >= min_words:
+        if len(merged[index].source.split()) >= min_words:
             index += 1
             continue
 
@@ -97,7 +97,7 @@ def merge_cues_below_min_words(
 def count_cues_below_min_words(cues: list[Cue], min_words: int) -> int:
     if min_words <= 0:
         return 0
-    return sum(len(cue.display_text.split()) < min_words for cue in cues)
+    return sum(len(cue.source.split()) < min_words for cue in cues)
 
 
 def _merge_clause_cues(left: Cue, right: Cue) -> Cue:

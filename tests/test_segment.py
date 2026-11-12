@@ -319,11 +319,23 @@ def test_one_word_sentence_stays_as_one_clause() -> None:
     assert cues[0] is cue
 
 
-def test_cues_below_min_words_counts_display_words_and_zero_disables() -> None:
-    cues = [Cue(0, 1, "two source", "מילה"), Cue(1, 2, "one", "שתי מילים")]
+def test_cues_below_min_words_counts_source_words_and_zero_disables() -> None:
+    cues = [Cue(0, 1, "four english words here", "קצר"), Cue(1, 2, "one", "שתי מילים כאן")]
 
     assert count_cues_below_min_words(cues, 2) == 1
     assert count_cues_below_min_words(cues, 0) == 0
+
+
+def test_min_cue_words_counts_english_source_not_hebrew_display() -> None:
+    words = make_words(["two", "words", "three", "more", "words"])
+    cues = [
+        Cue(words[0].start, words[1].end, "two words", "א", words[:2]),
+        Cue(words[2].start, words[-1].end, "three more words", "ב ג ד", words[2:]),
+    ]
+
+    merged = merge_cues_below_min_words(cues, min_words=2, max_chars=100)
+
+    assert [cue.display_text for cue in merged] == ["א", "ב ג ד"]
 
 
 def test_oversized_clause_splits_at_its_largest_internal_pause() -> None:
