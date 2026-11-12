@@ -16,6 +16,7 @@ LATIN_RUN = re.compile(
 LRI = "\u2066"
 PDI = "\u2069"
 RLM = "\u200f"
+HEBREW_LETTER = re.compile(r"[\u05d0-\u05ea]")
 
 
 def subtitle_geometry(
@@ -164,6 +165,7 @@ def _highlight_events(
     events: list[str] = []
     for group_start in range(0, len(words), 3):
         group = words[group_start : group_start + 3]
+        rtl = _line_is_rtl(group)
         for active_index in range(len(group)):
             rendered = []
             for index, word in enumerate(group):
@@ -171,6 +173,8 @@ def _highlight_events(
                 if index == active_index:
                     isolated = f"{{\\c{highlight}}}{isolated}{{\\c{primary}}}"
                 rendered.append(isolated)
+            if rtl:
+                rendered.reverse()
             text = pop + " ".join(rendered) + RLM
             word_index = group_start + active_index
             events.append(
@@ -181,6 +185,12 @@ def _highlight_events(
                 )
             )
     return events
+
+
+def _line_is_rtl(words: list[str]) -> bool:
+    letters = [character for word in words for character in word if character.isalpha()]
+    hebrew_count = sum(bool(HEBREW_LETTER.fullmatch(character)) for character in letters)
+    return hebrew_count > 0 and hebrew_count * 2 >= len(letters)
 
 
 def _highlight_boundaries(cue: Cue, words: list[str], duration_cs: int) -> list[int]:

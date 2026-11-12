@@ -1,3 +1,4 @@
+import hashlib
 import re
 import subprocess
 from pathlib import Path
@@ -141,6 +142,21 @@ def test_box_caption_style_is_byte_for_byte_default(tmp_path: Path) -> None:
     assert "Style: Default,Ploni DL 1.1 AAA" in default.read_text(encoding="utf-8")
 
 
+def test_box_rtl_output_matches_caption_style_baseline(tmp_path: Path) -> None:
+    destination = tmp_path / "box.ass"
+    write_ass(
+        [Cue(0, 1, "one two three", "ראשון שני שלישי")],
+        destination,
+        720,
+        1280,
+        caption_style="box",
+    )
+
+    assert hashlib.sha256(destination.read_bytes()).hexdigest() == (
+        "dcb6142bbfbb10ac4e5665840e1a207cfbe1f97e8f89869902402629e12252f6"
+    )
+
+
 def test_capcut_caption_style_highlights_ordered_words(tmp_path: Path) -> None:
     cue = Cue(0, 1.2, "one two three four", "אחד שני three ארבעה")
     destination = tmp_path / "capcut.ass"
@@ -159,6 +175,78 @@ def test_capcut_caption_style_highlights_ordered_words(tmp_path: Path) -> None:
         for event in dialogues
     ]
     assert active_words == cue.display_text.split()
+
+
+def _plain_event_tokens(event: str) -> list[str]:
+    text = event.rsplit(",,", 1)[1]
+    text = re.sub(r"\{[^}]+\}|[\u200e\u200f\u2066\u2069]", "", text)
+    return text.split()
+
+
+def test_capcut_rtl_events_emit_visual_token_order(tmp_path: Path) -> None:
+    destination = tmp_path / "capcut.ass"
+    write_ass(
+        [Cue(0, 1, "one two three", "ראשון שני שלישי")],
+        destination,
+        720,
+        1280,
+        caption_style="capcut",
+    )
+
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    assert [_plain_event_tokens(event) for event in dialogues] == [
+        ["שלישי", "שני", "ראשון"],
+        ["שלישי", "שני", "ראשון"],
+        ["שלישי", "שני", "ראשון"],
+    ]
+
+
+def test_capcut_ltr_events_keep_logical_token_order(tmp_path: Path) -> None:
+    destination = tmp_path / "capcut.ass"
+    write_ass(
+        [Cue(0, 1, "one two three", "one two three")],
+        destination,
+        720,
+        1280,
+        caption_style="capcut",
+    )
+
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    assert all(_plain_event_tokens(event) == ["one", "two", "three"] for event in dialogues)
+
+
+def test_capcut_mixed_rtl_events_preserve_latin_isolation(tmp_path: Path) -> None:
+    destination = tmp_path / "capcut.ass"
+    write_ass(
+        [Cue(0, 1, "hello world good", "שלום world טוב")],
+        destination,
+        720,
+        1280,
+        caption_style="capcut",
+    )
+
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    assert all(_plain_event_tokens(event) == ["טוב", "world", "שלום"] for event in dialogues)
+    assert all(f"{LRI}world{PDI}" in event for event in dialogues)
+
+
+def test_capcut_rtl_reordering_keeps_each_word_and_overrides(tmp_path: Path) -> None:
+    destination = tmp_path / "capcut.ass"
+    words = ["ראשון", "שני", "שלישי"]
+    write_ass(
+        [Cue(0, 1, "one two three", " ".join(words))],
+        destination,
+        720,
+        1280,
+        caption_style="capcut",
+    )
+
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    for event in dialogues:
+        assert sorted(_plain_event_tokens(event)) == sorted(words)
+        assert event.count(r"\fscx80") == 1
+        assert event.count(r"\c&H0000FFFF&") == 1
+        assert event.count(r"\c&H00FFFFFF&") == 1
 
 
 def test_capcut_highlight_follows_uneven_asr_word_starts(tmp_path: Path) -> None:
