@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from hs.ass import LRI, PDI, _ass_text, format_timestamp, subtitle_geometry, write_ass
-from hs.models import Cue
+from hs.models import Cue, Word
 from hs.text import QUOTE_CHARACTERS
 
 
@@ -121,6 +121,14 @@ def _style_and_dialogues(content: str) -> tuple[str, list[str]]:
     )
 
 
+def _dialogue_windows(dialogues: list[str]) -> list[tuple[int, int]]:
+    timestamps = [
+        re.match(r"Dialogue: 0,([^,]+),([^,]+),", dialogue).groups()
+        for dialogue in dialogues
+    ]
+    return [(_ass_centiseconds(start), _ass_centiseconds(end)) for start, end in timestamps]
+
+
 def test_box_caption_style_is_byte_for_byte_default(tmp_path: Path) -> None:
     cues = [Cue(0, 1, "one", "שלום"), Cue(1, 2, "two", "עולם")]
     default = tmp_path / "default.ass"
@@ -151,6 +159,76 @@ def test_capcut_caption_style_highlights_ordered_words(tmp_path: Path) -> None:
         for event in dialogues
     ]
     assert active_words == cue.display_text.split()
+
+
+def test_capcut_highlight_follows_uneven_asr_word_starts(tmp_path: Path) -> None:
+    cue = Cue(
+        1,
+        2.2,
+        "one two three",
+        "אחד שני שלושה",
+        words=[Word(1, 1.1, "one"), Word(1.1, 2, "two"), Word(2, 2.2, "three")],
+    )
+    destination = tmp_path / "capcut.ass"
+
+    write_ass([cue], destination, 720, 1280, caption_style="capcut")
+
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    windows = _dialogue_windows(dialogues)
+    assert [start for start, _ in windows] == [100, 110, 200]
+    assert all(start < end for start, end in windows)
+    assert all(left[1] <= right[0] for left, right in zip(windows, windows[1:]))
+    assert all(100 <= start < end <= 220 for start, end in windows)
+
+
+def test_capcut_without_asr_words_keeps_character_weighted_windows(tmp_path: Path) -> None:
+    destination = tmp_path / "capcut.ass"
+    write_ass(
+        [Cue(0, 1.2, "one two three", "א בbbb גג")],
+        destination,
+        720,
+        1280,
+        caption_style="capcut",
+    )
+
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    assert _dialogue_windows(dialogues) == [(0, 17), (17, 86), (86, 120)]
+
+
+def test_capcut_with_fewer_asr_words_still_emits_every_display_word(tmp_path: Path) -> None:
+    cue = Cue(
+        0,
+        1,
+        "one two",
+        "אחד שני שלושה ארבעה",
+        words=[Word(0, 0.2, "one"), Word(0.2, 1, "two")],
+    )
+    destination = tmp_path / "capcut.ass"
+
+    write_ass([cue], destination, 720, 1280, caption_style="capcut")
+
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    windows = _dialogue_windows(dialogues)
+    assert len(windows) == 4
+    assert all(left[1] <= right[0] for left, right in zip(windows, windows[1:]))
+
+
+def test_capcut_and_broadcast_use_the_same_asr_windows(tmp_path: Path) -> None:
+    cue = Cue(
+        0,
+        1.2,
+        "one two three",
+        "אחד שני שלושה",
+        words=[Word(0, 0.1, "one"), Word(0.1, 1, "two"), Word(1, 1.2, "three")],
+    )
+    windows_by_style = {}
+    for caption_style in ("capcut", "broadcast"):
+        destination = tmp_path / f"{caption_style}.ass"
+        write_ass([cue], destination, 720, 1280, caption_style=caption_style)
+        _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+        windows_by_style[caption_style] = _dialogue_windows(dialogues)
+
+    assert windows_by_style["capcut"] == windows_by_style["broadcast"]
 
 
 def test_card_caption_style_has_one_fading_event_per_cue(tmp_path: Path) -> None:

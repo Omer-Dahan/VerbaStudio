@@ -153,7 +153,7 @@ def _highlight_events(
 
     start_cs = round(cue.start * 100)
     duration_cs = max(0, round(cue.end * 100) - start_cs)
-    boundaries = _weighted_boundaries(words, duration_cs)
+    boundaries = _highlight_boundaries(cue, words, duration_cs)
     highlight = "&H0000FFFF&" if caption_style == "capcut" else "&H00FFFFFF&"
     primary = "&H00FFFFFF&" if caption_style == "capcut" else "&H00000000&"
     pop = (
@@ -181,6 +181,28 @@ def _highlight_events(
                 )
             )
     return events
+
+
+def _highlight_boundaries(cue: Cue, words: list[str], duration_cs: int) -> list[int]:
+    if not cue.words or len(cue.words) < len(words):
+        return _weighted_boundaries(words, duration_cs)
+
+    cue_start_cs = round(cue.start * 100)
+    source_count = len(cue.words)
+    display_count = len(words)
+    boundaries = []
+    for index in range(display_count):
+        source_index = min(source_count - 1, round(index * source_count / display_count))
+        offset = round(cue.words[source_index].start * 100) - cue_start_cs
+        boundaries.append(min(duration_cs, max(0, offset)))
+
+    minimum_window = 4 if duration_cs >= 4 * display_count else 2
+    if duration_cs >= minimum_window * display_count:
+        for index in range(display_count):
+            earliest = boundaries[index - 1] + minimum_window if index else 0
+            latest = duration_cs - minimum_window * (display_count - index)
+            boundaries[index] = min(latest, max(earliest, boundaries[index]))
+    return [*boundaries, duration_cs]
 
 
 def _weighted_boundaries(words: list[str], duration_cs: int) -> list[int]:
