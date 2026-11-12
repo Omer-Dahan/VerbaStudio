@@ -45,6 +45,7 @@ def test_defaults_fit_sixteen_gigabyte_gpu() -> None:
     assert args.min_cue_duration == 0.40
     assert args.cue_min_seconds == 0
     assert args.max_cue_words == 0
+    assert args.min_cue_words == 2
     assert args.max_size_mb == 9.0
     assert "fits 16GB" in " ".join(build_parser().format_help().split())
 
@@ -59,6 +60,8 @@ def test_clause_style_and_ignore_caption_band_parse() -> None:
             "1.5",
             "--max-cue-words",
             "10",
+            "--min-cue-words",
+            "3",
             "--ignore-caption-band",
         ]
     )
@@ -66,7 +69,17 @@ def test_clause_style_and_ignore_caption_band_parse() -> None:
     assert args.cue_style == "clauses"
     assert args.cue_min_seconds == 1.5
     assert args.max_cue_words == 10
+    assert args.min_cue_words == 3
     assert args.ignore_caption_band is True
+
+
+def test_reveal_cue_style_parses_and_is_described_as_word_by_word() -> None:
+    args = build_parser().parse_args(["source.mp4", "--cue-style", "reveal"])
+
+    assert args.cue_style == "reveal"
+    help_text = build_parser().format_help()
+    assert "karaoke" in help_text
+    assert "word-by-word" in help_text
 
 
 @pytest.mark.parametrize(
@@ -200,6 +213,7 @@ def test_json_success_is_parseable_and_has_required_shape(
         "no_word_loss", "size_mb", "downscaled", "quality_floor_hit",
         "existing_captions", "persisted", "artifacts",
         "cue_style", "clauses", "clause_split_fallback", "cues_below_min",
+        "cues_below_min_words",
     }
     assert manifest["persisted"] is False
     assert manifest["artifacts"] == []

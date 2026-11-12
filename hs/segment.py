@@ -61,6 +61,73 @@ def split_sentence_clauses(sentence: Cue, max_chars: int = 42) -> list[Cue]:
     ]
 
 
+def merge_cues_below_min_words(
+    cues: list[Cue], min_words: int, max_chars: int = 42
+) -> list[Cue]:
+    if min_words <= 0 or len(cues) <= 1:
+        return cues
+
+    merged = list(cues)
+    index = 0
+    while index < len(merged):
+        if len(merged[index].display_text.split()) >= min_words:
+            index += 1
+            continue
+
+        if index + 1 < len(merged):
+            forward = _merge_clause_cues(merged[index], merged[index + 1])
+            if (
+                forward.end - forward.start <= MAX_CLAUSE_DURATION
+                and _text_fits_lines(forward.display_text, max_chars, 2)
+            ):
+                merged[index : index + 2] = [forward]
+                continue
+
+        if index > 0:
+            merged[index - 1 : index + 1] = [
+                _merge_clause_cues(merged[index - 1], merged[index])
+            ]
+            index -= 1
+            continue
+
+        merged[:2] = [_merge_clause_cues(merged[0], merged[1])]
+    return merged
+
+
+def count_cues_below_min_words(cues: list[Cue], min_words: int) -> int:
+    if min_words <= 0:
+        return 0
+    return sum(len(cue.display_text.split()) < min_words for cue in cues)
+
+
+def _merge_clause_cues(left: Cue, right: Cue) -> Cue:
+    return Cue(
+        start=left.start,
+        end=right.end,
+        source=f"{left.source} {right.source}".strip(),
+        text=f"{left.display_text} {right.display_text}".strip(),
+        words=[*left.words, *right.words],
+        translation_failed=left.translation_failed or right.translation_failed,
+        translation_passthrough=left.translation_passthrough or right.translation_passthrough,
+        translation_outcome=left.translation_outcome or right.translation_outcome,
+        translation_attempts=max(left.translation_attempts, right.translation_attempts),
+        translation_retried=left.translation_retried or right.translation_retried,
+    )
+
+
+def _text_fits_lines(text: str, max_chars: int, max_lines: int) -> bool:
+    lines = 1
+    current = 0
+    for token in text.split():
+        width = len(token) if current == 0 else current + 1 + len(token)
+        if current and width > max_chars:
+            lines += 1
+            current = len(token)
+        else:
+            current = width
+    return lines <= max_lines and all(len(token) <= max_chars for token in text.split())
+
+
 def split_clause_by_word_limit(cue: Cue, max_words: int) -> list[Cue]:
     if max_words <= 0 or len(cue.words) <= max_words:
         return [cue]

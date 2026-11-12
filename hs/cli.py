@@ -27,6 +27,8 @@ from hs.qa import build_report, write_report
 from hs.segment import (
     segment_sentences,
     segment_words,
+    merge_cues_below_min_words,
+    count_cues_below_min_words,
     split_clause_by_word_limit,
     split_sentence_clauses,
 )
@@ -145,9 +147,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--cue-style",
-        choices=("sentences", "clauses", "words"),
+        choices=("sentences", "clauses", "reveal", "words"),
         default="sentences",
-        help="Sentence translation with sentence (default), clause, or legacy word cues",
+        help=(
+            "Sentence translation with sentence (default), clause, karaoke/word-by-word "
+            "reveal, or legacy word cues"
+        ),
     )
     parser.add_argument(
         "--cue-min-seconds",
@@ -160,6 +165,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=_nonnegative_int,
         default=0,
         help="Maximum words per clause cue; 0 disables this limit (default: 0)",
+    )
+    parser.add_argument(
+        "--min-cue-words",
+        type=_nonnegative_int,
+        default=2,
+        help="Minimum words per clause cue; 0 disables merging (default: 2)",
     )
     return parser
 
@@ -336,7 +347,7 @@ def _run(
     )
     if args.cue_style == "clauses":
         cues, clause_split_fallback = _display_clause_cues(
-            cues, sentence_clauses, max_chars
+            cues, sentence_clauses, max_chars, args.min_cue_words
         )
         cues = normalize_clause_cues(cues, effective_minimum, max_chars)
         cues = [
@@ -352,7 +363,7 @@ def _run(
             min_cue_duration=args.min_cue_duration,
             max_chars=max_chars,
         )
-    elif args.cue_style == "sentences":
+    elif args.cue_style in {"sentences", "reveal"}:
         cues = normalize_sentence_cues(cues)
     else:
         cues = normalize_sentence_cues(cues)
@@ -375,6 +386,7 @@ def _run(
         ),
         args.position,
         args.margin_v,
+        args.cue_style,
     )
     write_srt(cues, srt_path)
     report = build_report(
@@ -405,6 +417,11 @@ def _run(
     manifest["clause_split_fallback"] = clause_split_fallback
     manifest["cues_below_min"] = sum(
         cue.end - cue.start < effective_minimum for cue in cues
+    )
+    manifest["cues_below_min_words"] = (
+        count_cues_below_min_words(cues, args.min_cue_words)
+        if args.cue_style == "clauses" and args.min_cue_words > 0
+        else 0
     )
     manifest["cps_max"] = round(max((characters_per_second(cue) for cue in cues), default=0.0), 2)
     manifest["cps_target"] = round(cps_target, 2)
@@ -462,6 +479,7 @@ def _run(
                     "clauses": manifest["clauses"],
                     "clause_split_fallback": manifest["clause_split_fallback"],
                     "cues_below_min": manifest["cues_below_min"],
+                    "cues_below_min_words": manifest["cues_below_min_words"],
                 },
                 "transcript": " ".join(word.text for cue in cues for word in cue.words),
                 "cue_source": " ".join(cue.source for cue in cues),
@@ -528,6 +546,7 @@ def _display_clause_cues(
     sentences: list[Cue],
     sentence_clauses: list[list[Cue]],
     max_chars: int = 42,
+    min_words: int = 2,
 ) -> tuple[list[Cue], int]:
     displayed: list[Cue] = []
     fallbacks = 0
@@ -539,6 +558,7 @@ def _display_clause_cues(
             fallbacks += 1
             continue
         assert " ".join(pieces) == translated
+        sentence_display: list[Cue] = []
         for clause, piece in zip(clauses, pieces, strict=True):
             clause.text = piece
             clause.translation_failed = sentence.translation_failed
@@ -546,7 +566,10 @@ def _display_clause_cues(
             clause.translation_outcome = sentence.translation_outcome
             clause.translation_attempts = sentence.translation_attempts
             clause.translation_retried = sentence.translation_retried
-            displayed.append(clause)
+            sentence_display.append(clause)
+        displayed.extend(
+            merge_cues_below_min_words(sentence_display, min_words, max_chars)
+        )
     return displayed, fallbacks
 
 
@@ -575,6 +598,7 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
         "clauses": 0,
         "clause_split_fallback": 0,
         "cues_below_min": 0,
+        "cues_below_min_words": 0,
         "cps_max": 0.0,
         "cps_target": 17.0,
         "no_word_loss": False,
@@ -628,6 +652,7 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "min_cue_duration": args.min_cue_duration,
         "cue_min_seconds": args.cue_min_seconds,
         "max_cue_words": args.max_cue_words,
+        "min_cue_words": args.min_cue_words,
         "max_size_mb": args.max_size_mb,
         "cue_style": args.cue_style,
     }

@@ -3,7 +3,9 @@ import math
 import re
 
 from hs.models import Cue
+from hs.segment import split_sentence_clauses
 from hs.text import normalize_subtitle_text
+from hs.translate import split_translation
 
 
 DEFAULT_FONT = "Ploni DL 1.1 AAA"
@@ -38,6 +40,7 @@ def write_ass(
     caption_band: list[int] | None = None,
     position: str = "auto",
     margin_v_override: int | None = None,
+    cue_style: str = "sentences",
 ) -> Path:
     alignment, margin_v = subtitle_layout(
         height, caption_band, position, margin_v_override
@@ -47,6 +50,7 @@ def write_ass(
     border_style = 3 if boxed else 1
     style_outline = 8 if boxed else outline
     back_colour = f"&H{round((1 - box_alpha) * 255):02X}000000" if boxed else "&H80000000"
+    secondary_colour = "&H00808080" if cue_style == "reveal" else "&H000000FF"
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -56,18 +60,98 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{font_size},&H00FFFFFF,&H000000FF,&H00000000,{back_colour},0,0,0,0,100,100,0,0,{border_style},{style_outline:g},0,{alignment},{margin_h},{margin_h},{margin_v},1
+Style: Default,{font},{font_size},&H00FFFFFF,{secondary_colour},&H00000000,{back_colour},0,0,0,0,100,100,0,0,{border_style},{style_outline:g},0,{alignment},{margin_h},{margin_h},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    events = [
-        f"Dialogue: 0,{format_timestamp(cue.start)},{format_timestamp(cue.end)},Default,,0,0,0,,{{\\q2}}{_ass_text(cue.display_text, max_chars, font_size)}"
-        for cue in cues
-    ]
+    if cue_style == "reveal":
+        events = [
+            _dialogue(start, end, _karaoke_text(text, end - start, max_chars, font_size))
+            for cue in cues
+            for start, end, text in _reveal_groups(cue, max_chars)
+        ]
+    else:
+        events = [
+            _dialogue(
+                cue.start,
+                cue.end,
+                _ass_text(cue.display_text, max_chars, font_size),
+            )
+            for cue in cues
+        ]
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(header + "\n".join(events) + "\n", encoding="utf-8")
     return destination
+
+
+def _dialogue(start: float, end: float, text: str) -> str:
+    return (
+        f"Dialogue: 0,{format_timestamp(start)},{format_timestamp(end)},"
+        f"Default,,0,0,0,,{{\\q2}}{text}"
+    )
+
+
+def _reveal_groups(cue: Cue, max_chars: int) -> list[tuple[float, float, str]]:
+    text = " ".join(cue.display_text.split())
+    words = text.split()
+    if not words:
+        return []
+
+    source_clause_count = len(split_sentence_clauses(cue, max_chars)) if cue.words else 1
+    clause_pieces = split_translation(text, source_clause_count)
+    preferred_boundaries: set[int] = set()
+    if clause_pieces is not None:
+        offset = 0
+        for piece in clause_pieces[:-1]:
+            offset += len(piece.split())
+            preferred_boundaries.add(offset)
+
+    duration_cs = max(0, round((cue.end - cue.start) * 100))
+    minimum_groups = max(math.ceil(len(words) / 3), math.ceil(duration_cs / 250))
+    maximum_groups = max(1, len(words) // 2)
+    group_count = min(maximum_groups, max(1, minimum_groups))
+    sizes = _group_sizes(len(words), group_count, preferred_boundaries)
+    groups: list[str] = []
+    offset = 0
+    for size in sizes:
+        group = " ".join(words[offset : offset + size])
+        offset += size
+        lines, _ = layout_cue_lines(group, max_chars)
+        if len(lines) <= 2:
+            groups.append(group)
+        else:
+            groups.extend(words[offset - size : offset])
+
+    weights = [sum(len(word) for word in group.split()) for group in groups]
+    boundaries = [round(duration_cs * sum(weights[:index]) / sum(weights)) for index in range(len(groups) + 1)]
+    start_cs = round(cue.start * 100)
+    return [
+        ((start_cs + boundaries[index]) / 100, (start_cs + boundaries[index + 1]) / 100, group)
+        for index, group in enumerate(groups)
+    ]
+
+
+def _group_sizes(word_count: int, group_count: int, preferred: set[int]) -> list[int]:
+    if group_count == 1:
+        return [word_count]
+
+    sizes: list[int] = []
+    offset = 0
+    for index in range(group_count - 1):
+        groups_left = group_count - index - 1
+        low = max(offset + 2, word_count - 3 * groups_left)
+        high = min(offset + 3, word_count - 2 * groups_left)
+        target = round(word_count * (index + 1) / group_count)
+        choices = range(low, high + 1)
+        boundary = min(
+            choices,
+            key=lambda candidate: (candidate not in preferred, abs(candidate - target)),
+        )
+        sizes.append(boundary - offset)
+        offset = boundary
+    sizes.append(word_count - offset)
+    return sizes
 
 
 def subtitle_margin_v(height: int, caption_band: list[int] | None = None) -> int:
@@ -136,6 +220,34 @@ def layout_cue_lines(
 def _ass_text(text: str, max_chars: int, font_size: int | None = None) -> str:
     lines, used_font = layout_cue_lines(text, max_chars, font_size)
     body = r"\N".join(_bidi_line(line) for line in lines)
+    if font_size is not None and used_font != font_size:
+        return f"{{\\fs{used_font}}}{body}"
+    return body
+
+
+def _karaoke_text(
+    text: str, duration: float, max_chars: int, font_size: int | None = None
+) -> str:
+    lines, used_font = layout_cue_lines(text, max_chars, font_size)
+    tokens = [token for line in lines for token in line.split()]
+    if not tokens:
+        return ""
+
+    total = max(0, round(duration * 100))
+    character_total = sum(len(token) for token in tokens)
+    timings = [round(total * len(token) / character_total) for token in tokens[:-1]]
+    timings.append(total - sum(timings))
+
+    rendered_lines: list[str] = []
+    timing_index = 0
+    for line in lines:
+        rendered_words = []
+        for token in line.split():
+            isolated = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", token)
+            rendered_words.append(f"{{\\k{timings[timing_index]}}}{isolated}")
+            timing_index += 1
+        rendered_lines.append(" ".join(rendered_words) + RLM)
+    body = r"\N".join(rendered_lines)
     if font_size is not None and used_font != font_size:
         return f"{{\\fs{used_font}}}{body}"
     return body

@@ -3,6 +3,8 @@ from hs.segment import (
     segment_clauses,
     segment_sentences,
     segment_words,
+    merge_cues_below_min_words,
+    count_cues_below_min_words,
     split_clause_by_word_limit,
 )
 
@@ -277,6 +279,51 @@ def test_clause_segmenter_targets_four_to_seven_words_without_singletons() -> No
 
     assert all(2 <= len(cue.words) <= 7 for cue in cues)
     assert all(cue.words[-1].text.casefold() not in {"and", "the", "to", "of"} for cue in cues[:-1])
+
+
+def test_one_word_remainder_clause_merges_forward_when_it_fits() -> None:
+    words = make_words(["one", "two", "three", "four", "five"])
+    cues = [
+        Cue(words[0].start, words[0].end, "one", "וזה", [words[0]]),
+        Cue(words[1].start, words[-1].end, "two three four five", "מתאים קדימה", words[1:]),
+    ]
+
+    merged = merge_cues_below_min_words(cues, min_words=2, max_chars=100)
+
+    assert len(merged) == 1
+    assert merged[0].display_text == "וזה מתאים קדימה"
+    assert merged[0].words == words
+
+
+def test_one_word_remainder_clause_merges_backward_when_forward_would_overflow() -> None:
+    words = make_words(["one", "two", "three", "four", "five"], gap_after={2: 7.0})
+    cues = [
+        Cue(words[0].start, words[1].end, "one two", "אחורה מתאים", words[:2]),
+        Cue(words[2].start, words[2].end, "three", "וזה", [words[2]]),
+        Cue(words[3].start, words[-1].end, "four five", "קדימה רחוק", words[3:]),
+    ]
+
+    merged = merge_cues_below_min_words(cues, min_words=2, max_chars=100)
+
+    assert [cue.display_text for cue in merged] == ["אחורה מתאים וזה", "קדימה רחוק"]
+    assert [word for cue in merged for word in cue.words] == words
+
+
+def test_one_word_sentence_stays_as_one_clause() -> None:
+    word = Word(0, 0.5, "Go.")
+    cue = Cue(word.start, word.end, word.text, "לך", [word])
+
+    cues = merge_cues_below_min_words([cue], min_words=2)
+
+    assert len(cues) == 1
+    assert cues[0] is cue
+
+
+def test_cues_below_min_words_counts_display_words_and_zero_disables() -> None:
+    cues = [Cue(0, 1, "two source", "מילה"), Cue(1, 2, "one", "שתי מילים")]
+
+    assert count_cues_below_min_words(cues, 2) == 1
+    assert count_cues_below_min_words(cues, 0) == 0
 
 
 def test_oversized_clause_splits_at_its_largest_internal_pause() -> None:

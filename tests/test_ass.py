@@ -63,6 +63,56 @@ def test_ass_uses_video_resolution_style_and_rtl_override(tmp_path: Path) -> Non
     assert "{\\q2}שלום עולם\u200f" in content
 
 
+def test_reveal_ass_emits_short_groups_that_tile_the_sentence(tmp_path: Path) -> None:
+    destination = tmp_path / "reveal.ass"
+    write_ass(
+        [Cue(0, 6.03, "one two three four five six", "אחד שני שלושה ארבעה חמישה שישה")],
+        destination,
+        720,
+        1280,
+        cue_style="reveal",
+    )
+
+    content = destination.read_text(encoding="utf-8")
+    dialogues = [line for line in content.splitlines() if line.startswith("Dialogue:")]
+
+    assert len(dialogues) == 3
+    assert len(dialogues) == len(set(dialogues))
+    times = [re.match(r"Dialogue: 0,([^,]+),([^,]+),", line).groups() for line in dialogues]
+    assert times[0][0] == "0:00:00.00"
+    assert all(left[1] == right[0] for left, right in zip(times, times[1:]))
+    assert times[-1][1] == "0:00:06.03"
+    for dialogue, (start, end) in zip(dialogues, times):
+        plain = re.sub(r"\{[^}]+\}|[\u200e\u200f\u2066\u2069]", "", dialogue.split(",,", 1)[1])
+        assert len(plain.split()) <= 4
+        assert dialogue.count(r"\N") <= 1
+        start_cs = _ass_centiseconds(start)
+        end_cs = _ass_centiseconds(end)
+        assert end_cs - start_cs <= 250
+        assert sum(int(value) for value in re.findall(r"\\k(\d+)", dialogue)) == end_cs - start_cs
+    assert "Style: Default,Ploni DL 1.1 AAA" in content
+    assert "&H00808080" in content
+
+
+def test_reveal_ass_has_no_duplicate_events_for_two_sentences(tmp_path: Path) -> None:
+    destination = tmp_path / "reveal.ass"
+    cues = [
+        Cue(0, 2, "one two three four", "אחד שני שלושה ארבעה"),
+        Cue(2, 4, "five six seven eight", "חמישה שישה שבעה שמונה"),
+    ]
+
+    write_ass(cues, destination, 720, 1280, cue_style="reveal")
+
+    events = [line for line in destination.read_text(encoding="utf-8").splitlines() if line.startswith("Dialogue:")]
+    assert len(events) == len(set(events))
+
+
+def _ass_centiseconds(timestamp: str) -> int:
+    hours, minutes, seconds = timestamp.split(":")
+    whole, fraction = seconds.split(".")
+    return ((int(hours) * 60 + int(minutes)) * 60 + int(whole)) * 100 + int(fraction)
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
