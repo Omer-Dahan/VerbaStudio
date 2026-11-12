@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from hs.ass import _ass_text, format_timestamp, subtitle_geometry, write_ass
+from hs.ass import LRI, PDI, _ass_text, format_timestamp, subtitle_geometry, write_ass
 from hs.models import Cue
 from hs.text import QUOTE_CHARACTERS
 
@@ -111,6 +111,81 @@ def _ass_centiseconds(timestamp: str) -> int:
     hours, minutes, seconds = timestamp.split(":")
     whole, fraction = seconds.split(".")
     return ((int(hours) * 60 + int(minutes)) * 60 + int(whole)) * 100 + int(fraction)
+
+
+def _style_and_dialogues(content: str) -> tuple[str, list[str]]:
+    lines = content.splitlines()
+    return (
+        next(line for line in lines if line.startswith("Style:")),
+        [line for line in lines if line.startswith("Dialogue:")],
+    )
+
+
+def test_box_caption_style_is_byte_for_byte_default(tmp_path: Path) -> None:
+    cues = [Cue(0, 1, "one", "שלום"), Cue(1, 2, "two", "עולם")]
+    default = tmp_path / "default.ass"
+    explicit = tmp_path / "box.ass"
+
+    write_ass(cues, default, 720, 1280)
+    write_ass(cues, explicit, 720, 1280, caption_style="box")
+
+    assert default.read_bytes() == explicit.read_bytes()
+    assert "Style: Default,Ploni DL 1.1 AAA" in default.read_text(encoding="utf-8")
+
+
+def test_capcut_caption_style_highlights_ordered_words(tmp_path: Path) -> None:
+    cue = Cue(0, 1.2, "one two three four", "אחד שני three ארבעה")
+    destination = tmp_path / "capcut.ass"
+    write_ass([cue], destination, 720, 1280, caption_style="capcut")
+    style, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+
+    fields = style.split(",")
+    assert fields[1] == "Heebo Black"
+    assert fields[15] == "1"
+    assert float(fields[16]) > 3
+    assert all(r"\fscx80" in event and r"\c&H0000FFFF&" in event for event in dialogues)
+    windows = [re.match(r"Dialogue: 0,([^,]+),([^,]+),", event).groups() for event in dialogues]
+    assert all(_ass_centiseconds(left[1]) <= _ass_centiseconds(right[0]) for left, right in zip(windows, windows[1:]))
+    active_words = [
+        re.search(r"\{\\c&H0000FFFF&\}([^{} ]+)", event).group(1).replace("\u2066", "").replace("\u2069", "")
+        for event in dialogues
+    ]
+    assert active_words == cue.display_text.split()
+
+
+def test_card_caption_style_has_one_fading_event_per_cue(tmp_path: Path) -> None:
+    cues = [Cue(0, 1, "one", "שלום"), Cue(1, 2, "two", "עולם")]
+    destination = tmp_path / "card.ass"
+    write_ass(cues, destination, 720, 1280, caption_style="card")
+    style, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+
+    fields = style.split(",")
+    assert len(dialogues) == len(cues)
+    assert fields[15] == "3"
+    assert fields[6] == "&H00000000"
+    assert all(r"\fad(120,120)" in event for event in dialogues)
+    assert not any(r"\c&H0000FFFF&" in event for event in dialogues)
+
+
+def test_broadcast_caption_style_has_static_white_highlight(tmp_path: Path) -> None:
+    destination = tmp_path / "broadcast.ass"
+    write_ass([Cue(0, 1, "one two", "אחד שני")], destination, 720, 1280, caption_style="broadcast")
+    style, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    fields = style.split(",")
+
+    assert fields[3] == "&H00000000"
+    assert fields[6] == "&H0000FFFF"
+    assert all(r"\t(" not in event and r"\fad(" not in event for event in dialogues)
+
+
+@pytest.mark.parametrize("caption_style", ["box", "capcut", "card", "broadcast"])
+def test_caption_styles_keep_q2_and_latin_isolation(tmp_path: Path, caption_style: str) -> None:
+    destination = tmp_path / f"{caption_style}.ass"
+    write_ass([Cue(0, 1, "source", "שלום English עולם")], destination, 720, 1280, caption_style=caption_style)
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+
+    assert all(r"{\q2}" in event for event in dialogues)
+    assert all(LRI in event and PDI in event for event in dialogues)
 
 
 @pytest.mark.parametrize(

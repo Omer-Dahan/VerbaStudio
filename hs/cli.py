@@ -156,6 +156,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--caption-style",
+        choices=("box", "capcut", "card", "broadcast"),
+        default="box",
+        help="Visual caption preset (default: box)",
+    )
+    parser.add_argument(
         "--cue-min-seconds",
         type=_nonnegative_float,
         default=0,
@@ -179,6 +185,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     raw_argv = sys.argv[1:] if argv is None else argv
     args = build_parser().parse_args(raw_argv)
+    args.font_explicit = any(
+        item == "--font" or item.startswith("--font=") for item in raw_argv
+    )
     args.min_cue_duration_explicit = any(
         item == "--min-cue-duration" or item.startswith("--min-cue-duration=")
         for item in raw_argv
@@ -388,6 +397,8 @@ def _run(
         args.position,
         args.margin_v,
         args.cue_style,
+        args.caption_style,
+        args.font_explicit,
     )
     write_srt(cues, srt_path)
     report = build_report(
@@ -657,6 +668,7 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "min_cue_words": args.min_cue_words,
         "max_size_mb": args.max_size_mb,
         "cue_style": args.cue_style,
+        "caption_style": args.caption_style,
     }
 
 

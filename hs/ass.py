@@ -41,16 +41,51 @@ def write_ass(
     position: str = "auto",
     margin_v_override: int | None = None,
     cue_style: str = "sentences",
+    caption_style: str = "box",
+    font_explicit: bool = False,
 ) -> Path:
     alignment, margin_v = subtitle_layout(
         height, caption_band, position, margin_v_override
     )
     font_size, margin_h, max_chars = subtitle_geometry(width, height, size_scale)
-    boxed = box_alpha > 0
-    border_style = 3 if boxed else 1
-    style_outline = 8 if boxed else outline
-    back_colour = f"&H{round((1 - box_alpha) * 255):02X}000000" if boxed else "&H80000000"
-    secondary_colour = "&H00808080" if cue_style == "reveal" else "&H000000FF"
+    if caption_style == "box":
+        boxed = box_alpha > 0
+        border_style = 3 if boxed else 1
+        style_outline = 8 if boxed else outline
+        back_colour = f"&H{round((1 - box_alpha) * 255):02X}000000" if boxed else "&H80000000"
+        primary_colour = "&H00FFFFFF"
+        secondary_colour = "&H00808080" if cue_style == "reveal" else "&H000000FF"
+        outline_colour = "&H00000000"
+        shadow = 0
+        bold = 0
+    else:
+        base_font_size = min(64, max(28, round(height * 0.045)))
+        presets = {
+            "capcut": (
+                "Heebo Black", 1.35, 0, 1, "&H00FFFFFF", "&H0000FFFF",
+                "&H00000000", "&H80000000", 0.11, 0.05, 0.28,
+            ),
+            "card": (
+                "Assistant", 1.10, 0, 3, "&H00FFFFFF", "&H000000FF",
+                "&H00000000", "&H00000000", 0.62, 0, 0.10,
+            ),
+            "broadcast": (
+                "Heebo", 1.25, 1, 3, "&H00000000", "&H00FFFFFF",
+                "&H0000FFFF", "&H0000FFFF", 0.45, 0, 0.09,
+            ),
+        }
+        (
+            preset_font, scale, bold, border_style, primary_colour,
+            secondary_colour, outline_colour, back_colour, outline_scale,
+            shadow_scale, margin_scale,
+        ) = presets[caption_style]
+        if not font_explicit and font == DEFAULT_FONT:
+            font = preset_font
+        font_size = round(base_font_size * scale)
+        style_outline = max(3 if caption_style == "capcut" else 6, round(font_size * outline_scale))
+        shadow = max(1, round(font_size * shadow_scale)) if caption_style == "capcut" else 0
+        alignment = 2
+        margin_v = round(height * margin_scale)
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}
@@ -60,12 +95,23 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,{font},{font_size},&H00FFFFFF,{secondary_colour},&H00000000,{back_colour},0,0,0,0,100,100,0,0,{border_style},{style_outline:g},0,{alignment},{margin_h},{margin_h},{margin_v},1
+Style: Default,{font},{font_size},{primary_colour},{secondary_colour},{outline_colour},{back_colour},{bold},0,0,0,100,100,0,0,{border_style},{style_outline:g},{shadow:g},{alignment},{margin_h},{margin_h},{margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    if cue_style == "reveal":
+    if caption_style in {"capcut", "broadcast"}:
+        events = [
+            event
+            for cue in cues
+            for event in _highlight_events(cue, max_chars, font_size, caption_style)
+        ]
+    elif caption_style == "card":
+        events = [
+            _dialogue(cue.start, cue.end, r"{\fad(120,120)}" + _ass_text(cue.display_text, max_chars, font_size))
+            for cue in cues
+        ]
+    elif cue_style == "reveal":
         events = [
             _dialogue(start, end, _karaoke_text(text, end - start, max_chars, font_size))
             for cue in cues
@@ -90,6 +136,65 @@ def _dialogue(start: float, end: float, text: str) -> str:
         f"Dialogue: 0,{format_timestamp(start)},{format_timestamp(end)},"
         f"Default,,0,0,0,,{{\\q2}}{text}"
     )
+
+
+def _highlight_events(
+    cue: Cue, max_chars: int, font_size: int, caption_style: str
+) -> list[str]:
+    words = (
+        normalize_subtitle_text(cue.display_text)
+        .replace("\\", "＼")
+        .replace("{", "｛")
+        .replace("}", "｝")
+        .split()
+    )
+    if not words:
+        return []
+
+    start_cs = round(cue.start * 100)
+    duration_cs = max(0, round(cue.end * 100) - start_cs)
+    boundaries = _weighted_boundaries(words, duration_cs)
+    highlight = "&H0000FFFF&" if caption_style == "capcut" else "&H00FFFFFF&"
+    primary = "&H00FFFFFF&" if caption_style == "capcut" else "&H00000000&"
+    pop = (
+        r"{\fscx80\fscy80\t(0,80,\fscx108\fscy108)\t(80,150,\fscx100\fscy100)}"
+        if caption_style == "capcut"
+        else ""
+    )
+    events: list[str] = []
+    for group_start in range(0, len(words), 3):
+        group = words[group_start : group_start + 3]
+        for active_index in range(len(group)):
+            rendered = []
+            for index, word in enumerate(group):
+                isolated = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", word)
+                if index == active_index:
+                    isolated = f"{{\\c{highlight}}}{isolated}{{\\c{primary}}}"
+                rendered.append(isolated)
+            text = pop + " ".join(rendered) + RLM
+            word_index = group_start + active_index
+            events.append(
+                _dialogue(
+                    (start_cs + boundaries[word_index]) / 100,
+                    (start_cs + boundaries[word_index + 1]) / 100,
+                    text,
+                )
+            )
+    return events
+
+
+def _weighted_boundaries(words: list[str], duration_cs: int) -> list[int]:
+    character_total = sum(len(word) for word in words)
+    boundaries = [
+        round(duration_cs * sum(len(word) for word in words[:index]) / character_total)
+        for index in range(len(words) + 1)
+    ]
+    if duration_cs >= 4 * len(words):
+        for index in range(1, len(boundaries)):
+            boundaries[index] = max(boundaries[index], boundaries[index - 1] + 4)
+        for index in range(len(boundaries) - 2, -1, -1):
+            boundaries[index] = min(boundaries[index], boundaries[index + 1] - 4)
+    return boundaries
 
 
 def _reveal_groups(cue: Cue, max_chars: int) -> list[tuple[float, float, str]]:

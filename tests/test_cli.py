@@ -41,6 +41,7 @@ def test_defaults_fit_sixteen_gigabyte_gpu() -> None:
     assert args.compute_type == "int8_float16"
     assert args.size_scale == 1.20
     assert args.box_alpha == 0.55
+    assert args.caption_style == "box"
     assert args.outline == 2.0
     assert args.min_cue_duration == 0.40
     assert args.cue_min_seconds == 0
@@ -80,6 +81,51 @@ def test_reveal_cue_style_parses_and_is_described_as_word_by_word() -> None:
     help_text = build_parser().format_help()
     assert "karaoke" in help_text
     assert "word-by-word" in help_text
+
+
+def test_caption_style_choices_are_validated() -> None:
+    assert build_parser().parse_args(["source.mp4", "--caption-style", "capcut"]).caption_style == "capcut"
+
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["source.mp4", "--caption-style", "unknown"])
+
+
+def test_explicit_font_is_preserved_for_caption_presets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.touch()
+    captured: dict[str, object] = {}
+
+    def capture_write_ass(*args, **_kwargs):
+        captured["font"] = args[4]
+        captured["caption_style"] = args[12]
+        captured["font_explicit"] = args[13]
+        args[1].write_text("ass", encoding="utf-8")
+
+    monkeypatch.setattr("hs.cli.probe_video", lambda _path: {"width": 720, "height": 1280, "duration": 1})
+    monkeypatch.setattr("hs.cli.has_audio_stream", lambda _path: True)
+    monkeypatch.setattr("hs.cli.extract_audio", lambda *_args: None)
+    monkeypatch.setattr("hs.cli.transcribe", lambda *_args, **_kwargs: ([Word(0, 1, "hello")], "he"))
+    monkeypatch.setattr("hs.cli.write_ass", capture_write_ass)
+    monkeypatch.setattr(
+        "hs.cli.build_report",
+        lambda *_args, **_kwargs: {
+            "cps_violations": [],
+            "forced_cues": [],
+            "silence_overlaps": [],
+            "translation_failures": [],
+            "passthrough": 0,
+        },
+    )
+    monkeypatch.setattr("hs.cli.write_report", lambda *_args: None)
+
+    assert main([str(video), "--srt-only", "--font", "Custom Face", "--caption-style", "capcut"]) == 0
+    assert captured == {
+        "font": "Custom Face",
+        "caption_style": "capcut",
+        "font_explicit": True,
+    }
 
 
 @pytest.mark.parametrize(
