@@ -8,21 +8,23 @@ import time
 import subprocess
 from pathlib import Path
 
-from hs.ass import DEFAULT_FONT, subtitle_geometry, write_ass
+from hs.ass import DEFAULT_FONT, layout_cue_lines, subtitle_geometry, write_ass
 from hs.audio import extract_audio, has_audio_stream, probe_video
 from hs.burn import burn_subtitles, encoding_decisions
 from hs.cache import cache_key, restore_cache, store_cache
 from hs.captions import detect_existing_captions
+from hs.models import Cue
 from hs.cues import (
     adaptive_cps_target,
     characters_per_second,
     enforce_reading_speed,
     normalize_cues,
     normalize_sentence_cues,
+    extend_clause_durations,
     word_sequence_is_complete,
 )
 from hs.qa import build_report, write_report
-from hs.segment import segment_sentences, segment_words
+from hs.segment import segment_sentences, segment_words, split_sentence_clauses
 from hs.srt import write_srt
 from hs.transcribe import DEFAULT_MODEL, transcribe
 from hs.translate import (
@@ -30,6 +32,7 @@ from hs.translate import (
     DEFAULT_GLOSSARY_PATH,
     TranslationClient,
     server_is_healthy,
+    split_translation,
 )
 
 
@@ -102,6 +105,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=_nonnegative_int,
         help="Override the ASS vertical margin in pixels",
     )
+    parser.add_argument(
+        "--ignore-caption-band",
+        action="store_true",
+        help="Allow subtitles to overlap detected burned-in captions",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Write ASS and QA files without burning video")
     parser.add_argument("--json", action="store_true", help="Print a machine-readable run manifest")
     parser.add_argument(
@@ -132,15 +140,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--cue-style",
-        choices=("sentences", "words"),
+        choices=("sentences", "clauses", "words"),
         default="sentences",
-        help="One cue per sentence (default), or the legacy word-budget cues",
+        help="Sentence translation with sentence (default), clause, or legacy word cues",
     )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    raw_argv = sys.argv[1:] if argv is None else argv
+    args = build_parser().parse_args(raw_argv)
+    args.min_cue_duration_explicit = any(
+        item == "--min-cue-duration" or item.startswith("--min-cue-duration=")
+        for item in raw_argv
+    )
     started = time.perf_counter()
     manifest = _empty_manifest(args)
     try:
@@ -262,10 +275,13 @@ def _run(
     _, _, max_chars = subtitle_geometry(
         int(metadata["width"]), int(metadata["height"]), args.size_scale
     )
+    sentence_clauses: list[list[Cue]] = []
     if args.cue_style == "words":
         cues = segment_words(words, max_chars=max_chars)
     else:
         cues = segment_sentences(words)
+        if args.cue_style == "clauses":
+            sentence_clauses = [split_sentence_clauses(cue, max_chars) for cue in cues]
     if not cues:
         raise PipelineError("ASR failed: Whisper produced no timestamped words", 4)
     source_language = args.language or detected_language
@@ -295,6 +311,9 @@ def _run(
             )
     manifest["secs"]["translate"] = round(time.perf_counter() - translate_started, 3)
     _progress(args.progress, "translate")
+    clause_split_fallback = 0
+    if args.cue_style == "clauses":
+        cues, clause_split_fallback = _display_clause_cues(cues, sentence_clauses, max_chars)
     cps_target = adaptive_cps_target(cues, float(metadata["duration"]))
     if args.cue_style == "words":
         cues = enforce_reading_speed(
@@ -303,8 +322,13 @@ def _run(
             min_cue_duration=args.min_cue_duration,
             max_chars=max_chars,
         )
-    else:
+    elif args.cue_style == "sentences":
         cues = normalize_sentence_cues(cues)
+    else:
+        minimum = args.min_cue_duration
+        if not args.min_cue_duration_explicit:
+            minimum = 1.5
+        cues = extend_clause_durations(normalize_sentence_cues(cues), minimum)
     manifest["no_word_loss"] = word_sequence_is_complete(cues, words)
     if not manifest["no_word_loss"]:
         raise PipelineError("Cue normalization lost or duplicated transcript words", 7)
@@ -317,7 +341,11 @@ def _run(
         args.size_scale,
         args.box_alpha,
         args.outline,
-        existing_captions["band"] if existing_captions["detected"] else None,
+        (
+            existing_captions["band"]
+            if existing_captions["detected"] and not args.ignore_caption_band
+            else None
+        ),
         args.position,
         args.margin_v,
     )
@@ -334,6 +362,7 @@ def _run(
         args.position,
         args.margin_v,
         args.cue_style,
+        clause_split_fallback,
     )
     write_report(report, qa_json, qa_markdown)
 
@@ -343,6 +372,9 @@ def _run(
         manifest["persisted"] = True
         manifest["artifacts"] = [str(path) for path in cache_artifacts.values()]
     manifest["cue_count"] = len(cues)
+    manifest["cue_style"] = args.cue_style
+    manifest["clauses"] = len(cues) if args.cue_style == "clauses" else 0
+    manifest["clause_split_fallback"] = clause_split_fallback
     manifest["cps_max"] = round(max((characters_per_second(cue) for cue in cues), default=0.0), 2)
     manifest["cps_target"] = round(cps_target, 2)
     manifest["qa"] = {
@@ -365,7 +397,11 @@ def _run(
             f"gap={widest['gap']}px",
             file=sys.stderr,
         )
-    if report.get("layout_conflicts"):
+    if (
+        report.get("layout_conflicts")
+        and args.margin_v is None
+        and not args.ignore_caption_band
+    ):
         raise PipelineError("QA failed: subtitle layout intersects existing captions", 7)
     if args.strict and (report["cps_violations"] or report.get("boundary_issues")):
         raise PipelineError("QA failed: subtitle timing or reading-speed violations remain", 7)
@@ -391,6 +427,9 @@ def _run(
                     "downscaled": manifest["downscaled"],
                     "quality_floor_hit": manifest["quality_floor_hit"],
                     "existing_captions": manifest["existing_captions"],
+                    "cue_style": manifest["cue_style"],
+                    "clauses": manifest["clauses"],
+                    "clause_split_fallback": manifest["clause_split_fallback"],
                 },
                 "transcript": " ".join(word.text for cue in cues for word in cue.words),
                 "cue_source": " ".join(cue.source for cue in cues),
@@ -453,6 +492,61 @@ def _matches_known_output(video: Path) -> bool:
     return False
 
 
+def _display_clause_cues(
+    sentences: list[Cue], sentence_clauses: list[list[Cue]], max_chars: int = 42
+) -> tuple[list[Cue], int]:
+    displayed: list[Cue] = []
+    fallbacks = 0
+    for sentence, clauses in zip(sentences, sentence_clauses, strict=True):
+        translated = sentence.display_text
+        pieces = split_translation(translated, len(clauses))
+        while pieces is not None:
+            overflow = next(
+                (
+                    index
+                    for index, piece in enumerate(pieces)
+                    if len(layout_cue_lines(piece, max_chars)[0]) > 2
+                    and len(clauses[index].words) >= 4
+                ),
+                None,
+            )
+            if overflow is None:
+                break
+            replacement = _split_clause_once(clauses[overflow])
+            clauses[overflow : overflow + 1] = replacement
+            pieces = split_translation(translated, len(clauses))
+        if pieces is None:
+            displayed.append(sentence)
+            fallbacks += 1
+            continue
+        assert " ".join(pieces) == translated
+        for clause, piece in zip(clauses, pieces, strict=True):
+            clause.text = piece
+            clause.translation_failed = sentence.translation_failed
+            clause.translation_passthrough = sentence.translation_passthrough
+            clause.translation_outcome = sentence.translation_outcome
+            clause.translation_attempts = sentence.translation_attempts
+            clause.translation_retried = sentence.translation_retried
+            displayed.append(clause)
+    return displayed, fallbacks
+
+
+def _split_clause_once(cue: Cue) -> list[Cue]:
+    candidates = range(2, len(cue.words) - 1)
+    split_at = max(
+        candidates,
+        key=lambda index: (
+            cue.words[index].start - cue.words[index - 1].end,
+            -abs(index - len(cue.words) / 2),
+        ),
+    )
+    groups = (cue.words[:split_at], cue.words[split_at:])
+    return [
+        Cue(group[0].start, group[-1].end, " ".join(word.text for word in group), words=group)
+        for group in groups
+    ]
+
+
 def _file_digest(path: Path) -> bytes:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -474,6 +568,9 @@ def _empty_manifest(args: argparse.Namespace) -> dict:
         "model": args.model,
         "compute_type": args.compute_type,
         "cue_count": 0,
+        "cue_style": args.cue_style,
+        "clauses": 0,
+        "clause_split_fallback": 0,
         "cps_max": 0.0,
         "cps_target": 17.0,
         "no_word_loss": False,
@@ -521,6 +618,7 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "outline": args.outline,
         "position": args.position,
         "margin_v": args.margin_v,
+        "ignore_caption_band": args.ignore_caption_band,
         "gender": args.gender,
         "strict": args.strict,
         "min_cue_duration": args.min_cue_duration,

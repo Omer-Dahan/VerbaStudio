@@ -19,6 +19,16 @@ SENTENCE_TERMINATOR = re.compile(r"[.!?…][\"'”’)]*$")
 MIN_SENTENCE_DURATION = 1.2
 MAX_SENTENCE_DURATION = 14.0
 MAX_SENTENCE_CHARS = 180
+CLAUSE_PUNCTUATION = re.compile(r"[,;:][\"'”’)]*$")
+FUNCTION_WORDS = {
+    "a", "an", "and", "as", "at", "but", "by", "for", "from", "if", "in",
+    "into", "nor", "of", "on", "or", "the", "to", "with", "yet",
+}
+CLAUSE_PAUSE = 0.35
+CLAUSE_TARGET = 7
+CLAUSE_MAX_WORDS = 7
+CLAUSE_MIN_WORDS = 2
+MAX_CLAUSE_DURATION = 7.0
 
 
 def segment_sentences(words: list[Word]) -> list[Cue]:
@@ -32,6 +42,91 @@ def segment_sentences(words: list[Word]) -> list[Cue]:
     return [
         Cue(start=group[0].start, end=group[-1].end, source=_join_words(group), words=group)
         for group in groups
+    ]
+
+
+def segment_clauses(words: list[Word], max_chars: int = 42) -> list[Cue]:
+    clauses: list[Cue] = []
+    for sentence in segment_sentences(words):
+        clauses.extend(split_sentence_clauses(sentence, max_chars))
+    return clauses
+
+
+def split_sentence_clauses(sentence: Cue, max_chars: int = 42) -> list[Cue]:
+    groups = _clause_groups(sentence.words)
+    groups = [part for group in groups for part in _split_clause_to_caps(group, max_chars)]
+    return [
+        Cue(group[0].start, group[-1].end, _join_words(group), words=group)
+        for group in groups
+    ]
+
+
+def _clause_groups(words: list[Word]) -> list[list[Word]]:
+    if len(words) <= CLAUSE_MAX_WORDS:
+        return [words]
+
+    groups: list[list[Word]] = []
+    start = 0
+    while len(words) - start > CLAUSE_MAX_WORDS:
+        remaining = len(words) - start
+        candidates = [
+            index
+            for index in range(start + CLAUSE_MIN_WORDS, min(start + CLAUSE_MAX_WORDS, len(words) - CLAUSE_MIN_WORDS) + 1)
+            if _natural_clause_boundary(words, index)
+            and not _ends_on_function_word(words[index - 1])
+        ]
+        if candidates:
+            boundary = min(candidates, key=lambda index: abs(index - (start + CLAUSE_TARGET)))
+        else:
+            boundary = min(start + CLAUSE_TARGET, len(words) - CLAUSE_MIN_WORDS)
+            while boundary > start + CLAUSE_MIN_WORDS and _ends_on_function_word(words[boundary - 1]):
+                boundary -= 1
+        groups.append(words[start:boundary])
+        start = boundary
+    groups.append(words[start:])
+    if len(groups) > 1 and len(groups[-1]) < CLAUSE_MIN_WORDS:
+        groups[-2].extend(groups.pop())
+    return groups
+
+
+def _natural_clause_boundary(words: list[Word], index: int) -> bool:
+    return (
+        CLAUSE_PUNCTUATION.search(words[index - 1].text) is not None
+        or words[index].start - words[index - 1].end >= CLAUSE_PAUSE
+    )
+
+
+def _ends_on_function_word(word: Word) -> bool:
+    return word.text.strip(".,;:!?\"'()[]").casefold() in FUNCTION_WORDS
+
+
+def _split_clause_to_caps(words: list[Word], max_chars: int) -> list[list[Word]]:
+    duration = words[-1].end - words[0].start
+    # English source runs wider than the Hebrew it becomes. This estimate keeps
+    # the rendered target within the same two-line geometry without over-splitting.
+    translated_width = max(max_chars, round(max_chars * 1.4))
+    if (
+        len(words) <= CLAUSE_MAX_WORDS
+        and duration <= MAX_CLAUSE_DURATION
+        and _fits_lines(words, translated_width, 2)
+    ):
+        return [words]
+    if len(words) < CLAUSE_MIN_WORDS * 2:
+        return [words]
+
+    candidates = range(CLAUSE_MIN_WORDS, len(words) - CLAUSE_MIN_WORDS + 1)
+    split_at = max(
+        candidates,
+        key=lambda index: (
+            words[index].start - words[index - 1].end,
+            -abs(index - len(words) / 2),
+        ),
+    )
+    left = words[:split_at]
+    right = words[split_at:]
+    return [
+        *_split_clause_to_caps(left, max_chars),
+        *_split_clause_to_caps(right, max_chars),
     ]
 
 

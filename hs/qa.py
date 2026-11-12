@@ -24,6 +24,7 @@ def build_report(
     position: str = "auto",
     margin_v: int | None = None,
     cue_style: str = "sentences",
+    clause_split_fallback: int = 0,
 ) -> dict:
     silences = detect_silences(video_path, duration)
     boundary_issues = validate_boundaries(cues, duration)
@@ -61,6 +62,8 @@ def build_report(
     return {
         "cue_count": len(cues),
         "cue_style": cue_style,
+        "clauses": len(cues) if cue_style == "clauses" else 0,
+        "clause_split_fallback": clause_split_fallback,
         "sentences": len(cues),
         "mean_sentence_s": round(sum(durations) / len(durations), 3) if durations else 0.0,
         "max_sentence_s": round(max(durations), 3) if durations else 0.0,
@@ -111,6 +114,8 @@ def write_report(report: dict, json_path: Path, markdown_path: Path) -> None:
         "# Subtitle QA",
         "",
         f"- Cue style: {report.get('cue_style', 'sentences')}",
+        f"- Clauses: {report.get('clauses', 0)}",
+        f"- Clause split fallbacks: {report.get('clause_split_fallback', 0)}",
         f"- Cues: {report['cue_count']}",
         f"- Sentences: {report.get('sentences', report['cue_count'])}",
         f"- Mean sentence duration: {report.get('mean_sentence_s', 0.0):.3f}s",

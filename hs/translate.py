@@ -37,10 +37,54 @@ GENDER_HINTS = {
 RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
 RELOAD_RECOVERY_SECONDS = 180.0
 HEALTH_POLL_SECONDS = 5.0
+HEBREW_BOUNDARY = re.compile(r"[,;:?!\.…][\"'”’)]*$")
 
 
 class PermanentTranslationError(RuntimeError):
     pass
+
+
+def split_translation(text: str, piece_count: int) -> list[str] | None:
+    normalized = " ".join(text.split())
+    if normalized != text or piece_count < 1:
+        return None
+    if piece_count == 1:
+        return [text]
+
+    words = text.split(" ")
+    minimum = 1 if len(words) < 2 else 2
+    if len(words) < piece_count * minimum:
+        return None
+
+    boundaries: list[int] = []
+    previous = 0
+    for piece_index in range(1, piece_count):
+        pieces_left = piece_count - piece_index
+        low = previous + minimum
+        high = len(words) - pieces_left * minimum
+        target = len(words) * piece_index / piece_count
+        punctuation = [
+            index
+            for index in range(low, high + 1)
+            if HEBREW_BOUNDARY.search(words[index - 1])
+        ]
+        nearby_punctuation = [
+            index
+            for index in punctuation
+            if abs(index - target) <= len(words) / piece_count / 2
+        ]
+        candidates = nearby_punctuation or list(range(low, high + 1))
+        boundary = min(candidates, key=lambda index: abs(index - target))
+        boundaries.append(boundary)
+        previous = boundary
+
+    pieces = []
+    start = 0
+    for end in [*boundaries, len(words)]:
+        pieces.append(" ".join(words[start:end]))
+        start = end
+    assert " ".join(pieces) == text
+    return pieces
 
 
 class TranslationClient:

@@ -146,6 +146,15 @@ def normalize_sentence_cues(cues: list[Cue]) -> list[Cue]:
     ]
 
 
+def extend_clause_durations(cues: list[Cue], minimum: float = 1.5) -> list[Cue]:
+    extended: list[Cue] = []
+    for index, cue in enumerate(cues):
+        next_start = cues[index + 1].start if index + 1 < len(cues) else cue.end
+        end = min(next_start, max(cue.end, cue.start + minimum))
+        extended.append(replace(cue, end=end))
+    return extended
+
+
 def normalize_cues(cues: list[Cue], min_cue_duration: float = 0.40) -> list[Cue]:
     deduplicated: list[Cue] = []
     for cue in cues:

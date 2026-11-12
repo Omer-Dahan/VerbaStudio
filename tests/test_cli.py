@@ -13,6 +13,7 @@ from hs.cli import (
     main,
     resolve_output_path,
     wait_for_translation_server,
+    _display_clause_cues,
 )
 from hs.burn import BurnResult
 from hs.models import Cue, Word
@@ -44,6 +45,15 @@ def test_defaults_fit_sixteen_gigabyte_gpu() -> None:
     assert args.min_cue_duration == 0.40
     assert args.max_size_mb == 9.0
     assert "fits 16GB" in " ".join(build_parser().format_help().split())
+
+
+def test_clause_style_and_ignore_caption_band_parse() -> None:
+    args = build_parser().parse_args(
+        ["source.mp4", "--cue-style", "clauses", "--ignore-caption-band"]
+    )
+
+    assert args.cue_style == "clauses"
+    assert args.ignore_caption_band is True
 
 
 @pytest.mark.parametrize(
@@ -176,6 +186,7 @@ def test_json_success_is_parseable_and_has_required_shape(
         "cue_count", "cps_max", "cps_target", "qa", "secs", "exit",
         "no_word_loss", "size_mb", "downscaled", "quality_floor_hit",
         "existing_captions", "persisted", "artifacts",
+        "cue_style", "clauses", "clause_split_fallback",
     }
     assert manifest["persisted"] is False
     assert manifest["artifacts"] == []
@@ -312,6 +323,50 @@ def test_cue_style_defaults_to_sentences_and_words_reproduces_prior_behaviour(
         assert main([str(video), "--dry-run"]) == 0
         assert sentences_path.called
         assert not words_path.called
+
+
+def test_impossible_clause_translation_split_records_fallback() -> None:
+    words = [Word(0, 0.5, "one"), Word(0.6, 1.0, "two"), Word(1.1, 1.5, "three")]
+    sentence = Cue(0, 1.5, "one two three", "מעט מדי מילים", words)
+    clauses = [
+        Cue(0, 0.5, "one", words=[words[0]]),
+        Cue(0.6, 1.5, "two three", words=words[1:]),
+    ]
+
+    displayed, fallback_count = _display_clause_cues([sentence], [clauses])
+
+    assert displayed == [sentence]
+    assert fallback_count == 1
+
+
+def test_explicit_margin_layout_conflict_is_reported_but_does_not_fail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    video = tmp_path / "source.mp4"
+    video.touch()
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "home")
+    conflict = {"text_band": [900, 1080], "text_band_pct": [83.33, 100.0],
+                "caption_band": [940, 1080], "caption_band_pct": [87, 100], "gap": -140}
+    report = {
+        "cps_violations": [], "forced_cues": [], "silence_overlaps": [],
+        "translation_failures": [], "passthrough": 0, "boundary_issues": [],
+        "layout_conflicts": [conflict], "layout_bands": [conflict],
+    }
+    with (
+        patch("hs.cli.probe_video", return_value={"width": 1080, "height": 1080, "duration": 2.0}),
+        patch("hs.cli.has_audio_stream", return_value=True),
+        patch("hs.cli.detect_existing_captions", return_value={"detected": True, "band": [87, 100]}),
+        patch("hs.cli.extract_audio"),
+        patch("hs.cli.transcribe", return_value=([Word(0, 2, "hello world.")], "en")),
+        patch("hs.cli.TranslationClient.translate_cues"),
+        patch("hs.cli.build_report", return_value=report),
+        patch("hs.cli.write_report"),
+    ):
+        exit_code = main([str(video), "--dry-run", "--json", "--margin-v", "40"])
+
+    manifest = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert manifest["qa"]["layout_conflicts"] == [conflict]
 
 
 def test_no_audio_stream_returns_exit_three(tmp_path: Path) -> None:

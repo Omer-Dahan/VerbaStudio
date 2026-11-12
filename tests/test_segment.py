@@ -1,5 +1,5 @@
 from hs.models import Word
-from hs.segment import segment_sentences, segment_words
+from hs.segment import segment_clauses, segment_sentences, segment_words
 
 
 def make_words(texts: list[str], step: float = 0.45, gap_after: dict[int, float] | None = None):
@@ -230,6 +230,41 @@ def test_sentence_segmenter_never_emits_punctuation_only_cue() -> None:
 
     assert [cue.source for cue in cues] == ["This ends.", "Another ends?"]
     assert all(any(character.isalpha() for character in cue.source) for cue in cues)
+
+
+def test_clause_segmenter_splits_on_commas_and_pauses() -> None:
+    words = make_words(
+        "First useful opening clause here, then another useful phrase with a pause and final ending.".split(),
+        gap_after={8: 0.45},
+    )
+
+    cues = segment_clauses(words, max_chars=100)
+
+    assert cues[0].source.endswith(",")
+    assert any(right.start - left.end >= 0.35 for left, right in zip(cues, cues[1:]))
+    assert [word for cue in cues for word in cue.words] == words
+
+
+def test_clause_segmenter_targets_four_to_seven_words_without_singletons() -> None:
+    words = make_words("one two three four five six seven eight nine ten eleven twelve thirteen.".split())
+
+    cues = segment_clauses(words)
+
+    assert all(2 <= len(cue.words) <= 7 for cue in cues)
+    assert all(cue.words[-1].text.casefold() not in {"and", "the", "to", "of"} for cue in cues[:-1])
+
+
+def test_oversized_clause_splits_at_its_largest_internal_pause() -> None:
+    words = make_words(
+        ["longword"] * 8 + ["ending."],
+        gap_after={3: 0.3},
+    )
+
+    cues = segment_clauses(words, max_chars=12)
+
+    assert any(cue.words[-1] is words[3] for cue in cues[:-1])
+    assert all(left.end <= right.start for left, right in zip(cues, cues[1:]))
+    assert all(cue.start >= words[0].start and cue.end <= words[-1].end for cue in cues)
 
 
 def _wrap_source(text: str, max_chars: int) -> list[str]:

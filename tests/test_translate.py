@@ -18,6 +18,7 @@ from hs.translate import (
     load_glossary,
     server_is_healthy,
     should_passthrough,
+    split_translation,
 )
 
 
@@ -32,6 +33,29 @@ def test_official_prompt_has_quoted_text_after_two_newlines() -> None:
         text='"How are you?"',
     )
     assert prompt.endswith('\n\n"How are you?"')
+
+
+def test_hebrew_clause_split_preserves_every_character_and_punctuation() -> None:
+    sentence = "זה חלק ראשון, וזה החלק השני; ולבסוף מגיע החלק השלישי."
+
+    pieces = split_translation(sentence, 3)
+
+    assert pieces is not None
+    assert " ".join(pieces) == sentence
+    assert pieces[0].endswith(",")
+    assert pieces[1].endswith(";")
+
+
+def test_hebrew_clause_split_uses_nearest_proportional_space() -> None:
+    sentence = "אחד שני שלושה ארבעה חמישה שישה שבעה שמונה"
+
+    pieces = split_translation(sentence, 2)
+
+    assert pieces == ["אחד שני שלושה ארבעה", "חמישה שישה שבעה שמונה"]
+
+
+def test_hebrew_clause_split_returns_none_when_minimum_words_are_impossible() -> None:
+    assert split_translation("מעט מדי מילים", 2) is None
 
 
 def test_prompt_template_instructs_to_keep_ellipses() -> None:

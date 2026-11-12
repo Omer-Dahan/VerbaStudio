@@ -7,6 +7,7 @@ from hs.ass import _ass_text
 from hs.cues import (
     characters_per_second,
     enforce_reading_speed,
+    extend_clause_durations,
     normalize_cues,
     word_sequence_is_complete,
 )
@@ -32,6 +33,16 @@ def test_fast_cue_splits_on_real_word_boundary() -> None:
     assert [word for part in split for word in part.words] == words
     assert all(part.end - part.start >= 0.8 for part in split)
     assert all(left.end <= right.start for left, right in zip(split, split[1:]))
+
+
+def test_clause_duration_borrows_only_following_silence() -> None:
+    cues = [Cue(0.0, 0.8, "one two"), Cue(2.0, 8.8, "three four")]
+
+    extended = extend_clause_durations(cues, 1.5)
+
+    assert extended[0].end == 1.5
+    assert extended[0].end <= extended[1].start
+    assert all(cue.end - cue.start <= 7.0 for cue in extended)
 
 
 def test_cue_without_word_metadata_uses_proportional_timing() -> None:
