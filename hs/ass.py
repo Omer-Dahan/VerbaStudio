@@ -44,6 +44,7 @@ def write_ass(
     cue_style: str = "sentences",
     caption_style: str = "box",
     font_explicit: bool = False,
+    caption_pop: str = "subtle",
 ) -> Path:
     alignment, margin_v = subtitle_layout(
         height, caption_band, position, margin_v_override
@@ -105,7 +106,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         events = [
             event
             for cue in cues
-            for event in _highlight_events(cue, max_chars, font_size, caption_style)
+            for event in _highlight_events(
+                cue, max_chars, font_size, caption_style, caption_pop
+            )
         ]
     elif caption_style == "card":
         events = [
@@ -140,7 +143,11 @@ def _dialogue(start: float, end: float, text: str) -> str:
 
 
 def _highlight_events(
-    cue: Cue, max_chars: int, font_size: int, caption_style: str
+    cue: Cue,
+    max_chars: int,
+    font_size: int,
+    caption_style: str,
+    caption_pop: str,
 ) -> list[str]:
     words = (
         normalize_subtitle_text(cue.display_text)
@@ -157,11 +164,13 @@ def _highlight_events(
     boundaries = _highlight_boundaries(cue, words, duration_cs)
     highlight = "&H0000FFFF&" if caption_style == "capcut" else "&H00FFFFFF&"
     primary = "&H00FFFFFF&" if caption_style == "capcut" else "&H00000000&"
-    pop = (
-        r"{\fscx80\fscy80\t(0,80,\fscx108\fscy108)\t(80,150,\fscx100\fscy100)}"
-        if caption_style == "capcut"
-        else ""
-    )
+    entrances = {
+        "off": "",
+        "subtle": r"{\fscx97\fscy97\t(0,90,\fscx101.5\fscy101.5)\t(90,140,\fscx100\fscy100)}",
+        "fade": r"{\alpha&HFF&\t(0,90,\alpha&H00&)}",
+        "normal": r"{\fscx80\fscy80\t(0,80,\fscx108\fscy108)\t(80,150,\fscx100\fscy100)}",
+    }
+    entrance = entrances[caption_pop] if caption_style == "capcut" else ""
     events: list[str] = []
     for group_start in range(0, len(words), 3):
         group = words[group_start : group_start + 3]
@@ -175,7 +184,7 @@ def _highlight_events(
                 rendered.append(isolated)
             if rtl:
                 rendered.reverse()
-            text = pop + " ".join(rendered) + RLM
+            text = entrance + " ".join(rendered) + RLM
             word_index = group_start + active_index
             events.append(
                 _dialogue(

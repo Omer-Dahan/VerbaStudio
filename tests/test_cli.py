@@ -42,6 +42,7 @@ def test_defaults_fit_sixteen_gigabyte_gpu() -> None:
     assert args.size_scale == 1.20
     assert args.box_alpha == 0.55
     assert args.caption_style == "box"
+    assert args.caption_pop == "subtle"
     assert args.outline == 2.0
     assert args.min_cue_duration == 0.40
     assert args.cue_min_seconds == 0
@@ -85,9 +86,12 @@ def test_reveal_cue_style_parses_and_is_described_as_word_by_word() -> None:
 
 def test_caption_style_choices_are_validated() -> None:
     assert build_parser().parse_args(["source.mp4", "--caption-style", "capcut"]).caption_style == "capcut"
+    assert build_parser().parse_args(["source.mp4", "--caption-pop", "normal"]).caption_pop == "normal"
 
     with pytest.raises(SystemExit):
         build_parser().parse_args(["source.mp4", "--caption-style", "unknown"])
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["source.mp4", "--caption-pop", "unknown"])
 
 
 def test_explicit_font_is_preserved_for_caption_presets(
@@ -101,6 +105,7 @@ def test_explicit_font_is_preserved_for_caption_presets(
         captured["font"] = args[4]
         captured["caption_style"] = args[12]
         captured["font_explicit"] = args[13]
+        captured["caption_pop"] = args[14]
         args[1].write_text("ass", encoding="utf-8")
 
     monkeypatch.setattr("hs.cli.probe_video", lambda _path: {"width": 720, "height": 1280, "duration": 1})
@@ -125,6 +130,7 @@ def test_explicit_font_is_preserved_for_caption_presets(
         "font": "Custom Face",
         "caption_style": "capcut",
         "font_explicit": True,
+        "caption_pop": "subtle",
     }
 
 

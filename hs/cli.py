@@ -162,6 +162,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Visual caption preset (default: box)",
     )
     parser.add_argument(
+        "--caption-pop",
+        choices=("off", "subtle", "fade", "normal"),
+        default="subtle",
+        help="Per-word capcut entrance (default: subtle)",
+    )
+    parser.add_argument(
         "--cue-min-seconds",
         type=_nonnegative_float,
         default=0,
@@ -399,6 +405,7 @@ def _run(
         args.cue_style,
         args.caption_style,
         args.font_explicit,
+        args.caption_pop,
     )
     write_srt(cues, srt_path)
     report = build_report(
@@ -669,6 +676,7 @@ def _cache_settings(args: argparse.Namespace) -> dict:
         "max_size_mb": args.max_size_mb,
         "cue_style": args.cue_style,
         "caption_style": args.caption_style,
+        "caption_pop": args.caption_pop,
     }
 
 

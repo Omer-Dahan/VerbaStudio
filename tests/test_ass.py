@@ -167,7 +167,7 @@ def test_capcut_caption_style_highlights_ordered_words(tmp_path: Path) -> None:
     assert fields[1] == "Heebo Black"
     assert fields[15] == "1"
     assert float(fields[16]) > 3
-    assert all(r"\fscx80" in event and r"\c&H0000FFFF&" in event for event in dialogues)
+    assert all(r"\fscx97" in event and r"\c&H0000FFFF&" in event for event in dialogues)
     windows = [re.match(r"Dialogue: 0,([^,]+),([^,]+),", event).groups() for event in dialogues]
     assert all(_ass_centiseconds(left[1]) <= _ass_centiseconds(right[0]) for left, right in zip(windows, windows[1:]))
     active_words = [
@@ -244,7 +244,7 @@ def test_capcut_rtl_reordering_keeps_each_word_and_overrides(tmp_path: Path) -> 
     _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
     for event in dialogues:
         assert sorted(_plain_event_tokens(event)) == sorted(words)
-        assert event.count(r"\fscx80") == 1
+        assert event.count(r"\fscx97") == 1
         assert event.count(r"\c&H0000FFFF&") == 1
         assert event.count(r"\c&H00FFFFFF&") == 1
 
@@ -317,6 +317,75 @@ def test_capcut_and_broadcast_use_the_same_asr_windows(tmp_path: Path) -> None:
         windows_by_style[caption_style] = _dialogue_windows(dialogues)
 
     assert windows_by_style["capcut"] == windows_by_style["broadcast"]
+
+
+@pytest.mark.parametrize(
+    ("caption_pop", "expected", "excluded"),
+    [
+        ("off", "", (r"\t", r"\fscx")),
+        ("subtle", r"{\fscx97\fscy97\t(0,90,\fscx101.5\fscy101.5)\t(90,140,\fscx100\fscy100)}", ()),
+        ("fade", r"{\alpha&HFF&\t(0,90,\alpha&H00&)}", (r"\fscx",)),
+        ("normal", r"{\fscx80\fscy80\t(0,80,\fscx108\fscy108)\t(80,150,\fscx100\fscy100)}", ()),
+    ],
+)
+def test_capcut_caption_pop_modes(
+    tmp_path: Path,
+    caption_pop: str,
+    expected: str,
+    excluded: tuple[str, ...],
+) -> None:
+    destination = tmp_path / f"{caption_pop}.ass"
+    write_ass(
+        [Cue(0, 1, "one two", "אחד שני")],
+        destination,
+        720,
+        1280,
+        caption_style="capcut",
+        caption_pop=caption_pop,
+    )
+
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    assert all(expected in event for event in dialogues)
+    assert all(marker not in event for marker in excluded for event in dialogues)
+    if caption_pop == "subtle":
+        scales = [float(value) for event in dialogues for value in re.findall(r"\\fsc[xy]([\d.]+)", event)]
+        assert min(scales) >= 96
+        assert max(scales) <= 101.5
+
+
+def test_capcut_default_pop_is_subtle_and_modes_keep_event_decomposition(
+    tmp_path: Path,
+) -> None:
+    cue = Cue(
+        1,
+        2.2,
+        "one two three four",
+        "אחד שני three ארבעה",
+        words=[
+            Word(1, 1.1, "one"),
+            Word(1.1, 1.8, "two"),
+            Word(1.8, 2, "three"),
+            Word(2, 2.2, "four"),
+        ],
+    )
+    dialogues_by_mode = {}
+    for caption_pop in (None, "off", "subtle", "fade", "normal"):
+        label = caption_pop or "default"
+        destination = tmp_path / f"{label}.ass"
+        kwargs = {} if caption_pop is None else {"caption_pop": caption_pop}
+        write_ass([cue], destination, 720, 1280, caption_style="capcut", **kwargs)
+        _, dialogues_by_mode[label] = _style_and_dialogues(
+            destination.read_text(encoding="utf-8")
+        )
+
+    assert dialogues_by_mode["default"] == dialogues_by_mode["subtle"]
+    baseline = dialogues_by_mode["off"]
+    for dialogues in dialogues_by_mode.values():
+        assert len(dialogues) == len(baseline)
+        assert _dialogue_windows(dialogues) == _dialogue_windows(baseline)
+        assert [_plain_event_tokens(event) for event in dialogues] == [
+            _plain_event_tokens(event) for event in baseline
+        ]
 
 
 def test_card_caption_style_has_one_fading_event_per_cue(tmp_path: Path) -> None:
