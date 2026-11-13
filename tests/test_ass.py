@@ -5,7 +5,15 @@ from pathlib import Path
 
 import pytest
 
-from hs.ass import LRI, PDI, _ass_text, format_timestamp, subtitle_geometry, write_ass
+from hs.ass import (
+    LRI,
+    PDI,
+    _ass_text,
+    _rtl_highlight_segments,
+    format_timestamp,
+    subtitle_geometry,
+    write_ass,
+)
 from hs.models import Cue, Word
 from hs.text import QUOTE_CHARACTERS
 
@@ -183,10 +191,10 @@ def _plain_event_tokens(event: str) -> list[str]:
     return text.split()
 
 
-def test_capcut_rtl_events_emit_visual_token_order(tmp_path: Path) -> None:
+def test_capcut_rtl_events_emit_highlight_runs_in_visual_order(tmp_path: Path) -> None:
     destination = tmp_path / "capcut.ass"
     write_ass(
-        [Cue(0, 1, "one two three", "ראשון שני שלישי")],
+        [Cue(0, 1, "one two three", "אני רוצה בעל.")],
         destination,
         720,
         1280,
@@ -194,11 +202,33 @@ def test_capcut_rtl_events_emit_visual_token_order(tmp_path: Path) -> None:
     )
 
     _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
-    assert [_plain_event_tokens(event) for event in dialogues] == [
-        ["שלישי", "שני", "ראשון"],
-        ["שלישי", "שני", "ראשון"],
-        ["שלישי", "שני", "ראשון"],
+    event_texts = [
+        re.sub(r"^\{[^}]+\}", "", event.rsplit(r"{\q2}", 1)[1]).removesuffix("\u200f")
+        for event in dialogues
     ]
+    assert event_texts == [
+        r"רוצה בעל. {\c&H0000FFFF&}אני{\c&H00FFFFFF&}",
+        r"בעל. {\c&H0000FFFF&}רוצה{\c&H00FFFFFF&} אני",
+        r"{\c&H0000FFFF&}בעל.{\c&H00FFFFFF&} אני רוצה",
+    ]
+
+
+def test_rtl_highlight_segments_keep_words_logical_within_each_run() -> None:
+    rendered = ["כנראה", "אני", r"{\c&H0000FFFF&}לא{\c&H00FFFFFF&}", "רוצה", "בעל"]
+
+    assert " ".join(_rtl_highlight_segments(rendered, 2)) == (
+        r"רוצה בעל {\c&H0000FFFF&}לא{\c&H00FFFFFF&} כנראה אני"
+    )
+
+
+def test_rtl_highlight_segments_preserve_every_logical_word_at_each_position() -> None:
+    words = ["אחד", "שניים", "שלושה", "ארבעה"]
+    for active_index in range(len(words)):
+        rendered = words.copy()
+        rendered[active_index] = rf"{{\c&H0000FFFF&}}{words[active_index]}{{\c&H00FFFFFF&}}"
+        visual = " ".join(_rtl_highlight_segments(rendered, active_index))
+        plain = re.sub(r"\{[^}]+\}", "", visual).split()
+        assert sorted(plain) == sorted(words)
 
 
 def test_capcut_ltr_events_keep_logical_token_order(tmp_path: Path) -> None:
@@ -226,7 +256,11 @@ def test_capcut_mixed_rtl_events_preserve_latin_isolation(tmp_path: Path) -> Non
     )
 
     _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
-    assert all(_plain_event_tokens(event) == ["טוב", "world", "שלום"] for event in dialogues)
+    assert [_plain_event_tokens(event) for event in dialogues] == [
+        ["world", "טוב", "שלום"],
+        ["טוב", "world", "שלום"],
+        ["טוב", "שלום", "world"],
+    ]
     assert all(f"{LRI}world{PDI}" in event for event in dialogues)
 
 

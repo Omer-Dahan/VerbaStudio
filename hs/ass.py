@@ -183,7 +183,7 @@ def _highlight_events(
                     isolated = f"{{\\c{highlight}}}{isolated}{{\\c{primary}}}"
                 rendered.append(isolated)
             if rtl:
-                rendered.reverse()
+                rendered = _rtl_highlight_segments(rendered, active_index)
             text = entrance + " ".join(rendered) + RLM
             word_index = group_start + active_index
             events.append(
@@ -194,6 +194,18 @@ def _highlight_events(
                 )
             )
     return events
+
+
+def _rtl_highlight_segments(rendered: list[str], active_index: int) -> list[str]:
+    return [
+        segment
+        for segment in (
+            " ".join(rendered[active_index + 1 :]),
+            rendered[active_index],
+            " ".join(rendered[:active_index]),
+        )
+        if segment
+    ]
 
 
 def _line_is_rtl(words: list[str]) -> bool:
@@ -392,6 +404,8 @@ def _karaoke_text(
             isolated = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", token)
             rendered_words.append(f"{{\\k{timings[timing_index]}}}{isolated}")
             timing_index += 1
+        if _line_is_rtl(line.split()):
+            rendered_words.reverse()
         rendered_lines.append(" ".join(rendered_words) + RLM)
     body = r"\N".join(rendered_lines)
     if font_size is not None and used_font != font_size:
