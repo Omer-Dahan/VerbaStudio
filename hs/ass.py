@@ -87,8 +87,16 @@ def write_ass(
         font_size = round(base_font_size * scale)
         style_outline = max(3 if caption_style == "capcut" else 6, round(font_size * outline_scale))
         shadow = max(1, round(font_size * shadow_scale)) if caption_style == "capcut" else 0
-        alignment = 2
-        margin_v = round(height * margin_scale)
+        if position == "top":
+            alignment = 8
+            margin_v = round(height * 0.08)
+        else:
+            alignment = 2
+            margin_v = (
+                round(height * margin_scale)
+                if margin_v_override is None
+                else margin_v_override
+            )
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}

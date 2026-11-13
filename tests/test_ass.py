@@ -185,6 +185,56 @@ def test_capcut_caption_style_highlights_ordered_words(tmp_path: Path) -> None:
     assert active_words == cue.display_text.split()
 
 
+def test_capcut_caption_style_uses_margin_override(tmp_path: Path) -> None:
+    destination = tmp_path / "capcut.ass"
+
+    write_ass(
+        [Cue(0, 1, "one", "אחד")],
+        destination,
+        720,
+        1024,
+        caption_style="capcut",
+        margin_v_override=120,
+    )
+
+    style, _ = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    assert style.split(",")[21] == "120"
+
+
+def test_capcut_caption_style_keeps_preset_margin_by_default(tmp_path: Path) -> None:
+    destination = tmp_path / "capcut.ass"
+
+    write_ass(
+        [Cue(0, 1, "one", "אחד")],
+        destination,
+        720,
+        1024,
+        caption_style="capcut",
+    )
+
+    style, _ = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    assert style.split(",")[21] == "287"
+
+
+def test_capcut_top_position_wins_over_margin_override(tmp_path: Path) -> None:
+    destination = tmp_path / "capcut.ass"
+
+    write_ass(
+        [Cue(0, 1, "one", "אחד")],
+        destination,
+        720,
+        1024,
+        caption_style="capcut",
+        position="top",
+        margin_v_override=120,
+    )
+
+    style, _ = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    fields = style.split(",")
+    assert fields[18] == "8"
+    assert fields[21] == "82"
+
+
 def _plain_event_tokens(event: str) -> list[str]:
     text = event.rsplit(",,", 1)[1]
     text = re.sub(r"\{[^}]+\}|[\u200e\u200f\u2066\u2069]", "", text)
