@@ -207,10 +207,43 @@ def test_capcut_rtl_events_emit_highlight_runs_in_visual_order(tmp_path: Path) -
         for event in dialogues
     ]
     assert event_texts == [
-        r"רוצה בעל. {\c&H0000FFFF&}אני{\c&H00FFFFFF&}",
-        r"בעל. {\c&H0000FFFF&}רוצה{\c&H00FFFFFF&} אני",
-        r"{\c&H0000FFFF&}בעל.{\c&H00FFFFFF&} אני רוצה",
+        "רוצה בעל.\u200f " + r"{\c&H0000FFFF&}אני{\c&H00FFFFFF&}",
+        "בעל.\u200f " + r"{\c&H0000FFFF&}רוצה{\c&H00FFFFFF&} אני",
+        r"{\c&H0000FFFF&}בעל." + "\u200f" + r"{\c&H00FFFFFF&} אני רוצה",
     ]
+
+
+@pytest.mark.parametrize(
+    ("caption_style", "cue_style"),
+    [
+        ("box", "sentences"),
+        ("card", "sentences"),
+        ("capcut", "sentences"),
+        ("broadcast", "sentences"),
+        ("box", "reveal"),
+    ],
+)
+def test_trailing_punctuation_stays_inside_its_style_run(
+    tmp_path: Path, caption_style: str, cue_style: str
+) -> None:
+    destination = tmp_path / f"{caption_style}-{cue_style}.ass"
+    write_ass(
+        [Cue(0, 1, "source", "אחד שלך. הצרכים, אחרון")],
+        destination,
+        720,
+        1280,
+        caption_style=caption_style,
+        cue_style=cue_style,
+    )
+
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    event_texts = [dialogue.rsplit(r"{\q2}", 1)[1] for dialogue in dialogues]
+    assert any("שלך.\u200f" in text for text in event_texts)
+    assert any("הצרכים,\u200f" in text for text in event_texts)
+    assert all("שלך." not in text or "שלך.\u200f" in text for text in event_texts)
+    assert all("הצרכים," not in text or "הצרכים,\u200f" in text for text in event_texts)
+    assert not any(re.search(r"[.,:;!?]\{\\", text) for text in event_texts)
+    assert not any("\u200f\u200f" in text for text in event_texts)
 
 
 def test_rtl_highlight_segments_keep_words_logical_within_each_run() -> None:

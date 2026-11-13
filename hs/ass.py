@@ -17,6 +17,7 @@ LRI = "\u2066"
 PDI = "\u2069"
 RLM = "\u200f"
 HEBREW_LETTER = re.compile(r"[\u05d0-\u05ea]")
+TRAILING_RTL_PUNCTUATION = ".,:;!?"
 
 
 def subtitle_geometry(
@@ -178,13 +179,15 @@ def _highlight_events(
         for active_index in range(len(group)):
             rendered = []
             for index, word in enumerate(group):
-                isolated = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", word)
+                isolated = _render_token(word)
                 if index == active_index:
                     isolated = f"{{\\c{highlight}}}{isolated}{{\\c{primary}}}"
                 rendered.append(isolated)
             if rtl:
                 rendered = _rtl_highlight_segments(rendered, active_index)
-            text = entrance + " ".join(rendered) + RLM
+            text = entrance + " ".join(rendered)
+            if not text.endswith(RLM):
+                text += RLM
             word_index = group_start + active_index
             events.append(
                 _dialogue(
@@ -401,12 +404,15 @@ def _karaoke_text(
     for line in lines:
         rendered_words = []
         for token in line.split():
-            isolated = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", token)
+            isolated = _render_token(token)
             rendered_words.append(f"{{\\k{timings[timing_index]}}}{isolated}")
             timing_index += 1
         if _line_is_rtl(line.split()):
             rendered_words.reverse()
-        rendered_lines.append(" ".join(rendered_words) + RLM)
+        rendered_line = " ".join(rendered_words)
+        if not rendered_line.endswith(RLM):
+            rendered_line += RLM
+        rendered_lines.append(rendered_line)
     body = r"\N".join(rendered_lines)
     if font_size is not None and used_font != font_size:
         return f"{{\\fs{used_font}}}{body}"
@@ -414,5 +420,15 @@ def _karaoke_text(
 
 
 def _bidi_line(text: str) -> str:
-    isolated = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", text)
-    return isolated + RLM
+    rendered = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", text)
+    rendered = re.sub(
+        rf"([{re.escape(TRAILING_RTL_PUNCTUATION)}])(?= |$)",
+        rf"\1{RLM}",
+        rendered,
+    )
+    return rendered if rendered.endswith(RLM) else rendered + RLM
+
+
+def _render_token(token: str) -> str:
+    isolated = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", token)
+    return isolated + RLM if token.endswith(tuple(TRAILING_RTL_PUNCTUATION)) else isolated
