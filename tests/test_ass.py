@@ -179,7 +179,7 @@ def test_capcut_caption_style_highlights_ordered_words(tmp_path: Path) -> None:
     windows = [re.match(r"Dialogue: 0,([^,]+),([^,]+),", event).groups() for event in dialogues]
     assert all(_ass_centiseconds(left[1]) <= _ass_centiseconds(right[0]) for left, right in zip(windows, windows[1:]))
     active_words = [
-        re.search(r"\{\\c&H0000FFFF&\}([^{} ]+)", event).group(1).replace("\u2066", "").replace("\u2069", "")
+        re.search(r"\{\\c&H0000FFFF&[^}]*\}([^{} ]+)", event).group(1).replace("\u2066", "").replace("\u2069", "")
         for event in dialogues
     ]
     assert active_words == cue.display_text.split()
@@ -203,13 +203,18 @@ def test_capcut_rtl_events_emit_highlight_runs_in_visual_order(tmp_path: Path) -
 
     _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
     event_texts = [
-        re.sub(r"^\{[^}]+\}", "", event.rsplit(r"{\q2}", 1)[1]).removesuffix("\u200f")
+        event.rsplit(r"{\q2}", 1)[1].removesuffix("\u200f")
         for event in dialogues
     ]
+    opening = (
+        r"{\c&H0000FFFF&\fscx97\fscy97"
+        r"\t(0,90,\fscx101.5\fscy101.5)\t(90,140,\fscx100\fscy100)}"
+    )
+    closing = r"{\c&H00FFFFFF&\fscx100\fscy100}"
     assert event_texts == [
-        "רוצה בעל.\u200f " + r"{\c&H0000FFFF&}אני{\c&H00FFFFFF&}",
-        "בעל.\u200f " + r"{\c&H0000FFFF&}רוצה{\c&H00FFFFFF&} אני",
-        r"{\c&H0000FFFF&}בעל." + "\u200f" + r"{\c&H00FFFFFF&} אני רוצה",
+        "רוצה בעל.\u200f " + opening + "אני" + closing,
+        "בעל.\u200f " + opening + "רוצה" + closing + " אני",
+        opening + "בעל.\u200f" + closing + " אני רוצה",
     ]
 
 
@@ -387,18 +392,34 @@ def test_capcut_and_broadcast_use_the_same_asr_windows(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("caption_pop", "expected", "excluded"),
+    ("caption_pop", "entrance", "closing", "excluded"),
     [
-        ("off", "", (r"\t", r"\fscx")),
-        ("subtle", r"{\fscx97\fscy97\t(0,90,\fscx101.5\fscy101.5)\t(90,140,\fscx100\fscy100)}", ()),
-        ("fade", r"{\alpha&HFF&\t(0,90,\alpha&H00&)}", (r"\fscx",)),
-        ("normal", r"{\fscx80\fscy80\t(0,80,\fscx108\fscy108)\t(80,150,\fscx100\fscy100)}", ()),
+        ("off", "", r"{\c&H00FFFFFF&}", (r"\t", r"\fscx", r"\alpha")),
+        (
+            "subtle",
+            r"\fscx97\fscy97\t(0,90,\fscx101.5\fscy101.5)\t(90,140,\fscx100\fscy100)",
+            r"{\c&H00FFFFFF&\fscx100\fscy100}",
+            (),
+        ),
+        (
+            "fade",
+            r"\alpha&HFF&\t(0,90,\alpha&H00&)",
+            r"{\c&H00FFFFFF&\alpha&H00&}",
+            (r"\fscx",),
+        ),
+        (
+            "normal",
+            r"\fscx80\fscy80\t(0,80,\fscx108\fscy108)\t(80,150,\fscx100\fscy100)",
+            r"{\c&H00FFFFFF&\fscx100\fscy100}",
+            (),
+        ),
     ],
 )
 def test_capcut_caption_pop_modes(
     tmp_path: Path,
     caption_pop: str,
-    expected: str,
+    entrance: str,
+    closing: str,
     excluded: tuple[str, ...],
 ) -> None:
     destination = tmp_path / f"{caption_pop}.ass"
@@ -412,7 +433,15 @@ def test_capcut_caption_pop_modes(
     )
 
     _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
-    assert all(expected in event for event in dialogues)
+    highlighted_opening = rf"{{\c&H0000FFFF&{entrance}}}"
+    assert all(highlighted_opening in event for event in dialogues)
+    assert all(closing in event for event in dialogues)
+    assert not any(
+        event.rsplit(",,", 1)[1].removeprefix(r"{\q2}").startswith(
+            (r"{\fscx", r"{\alpha")
+        )
+        for event in dialogues
+    )
     assert all(marker not in event for marker in excluded for event in dialogues)
     if caption_pop == "subtle":
         scales = [float(value) for event in dialogues for value in re.findall(r"\\fsc[xy]([\d.]+)", event)]

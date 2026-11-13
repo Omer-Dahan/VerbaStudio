@@ -167,11 +167,17 @@ def _highlight_events(
     primary = "&H00FFFFFF&" if caption_style == "capcut" else "&H00000000&"
     entrances = {
         "off": "",
-        "subtle": r"{\fscx97\fscy97\t(0,90,\fscx101.5\fscy101.5)\t(90,140,\fscx100\fscy100)}",
-        "fade": r"{\alpha&HFF&\t(0,90,\alpha&H00&)}",
-        "normal": r"{\fscx80\fscy80\t(0,80,\fscx108\fscy108)\t(80,150,\fscx100\fscy100)}",
+        "subtle": r"\fscx97\fscy97\t(0,90,\fscx101.5\fscy101.5)\t(90,140,\fscx100\fscy100)",
+        "fade": r"\alpha&HFF&\t(0,90,\alpha&H00&)",
+        "normal": r"\fscx80\fscy80\t(0,80,\fscx108\fscy108)\t(80,150,\fscx100\fscy100)",
     }
     entrance = entrances[caption_pop] if caption_style == "capcut" else ""
+    reset = {
+        "off": "",
+        "subtle": r"\fscx100\fscy100",
+        "fade": r"\alpha&H00&",
+        "normal": r"\fscx100\fscy100",
+    }[caption_pop] if caption_style == "capcut" else ""
     events: list[str] = []
     for group_start in range(0, len(words), 3):
         group = words[group_start : group_start + 3]
@@ -181,11 +187,14 @@ def _highlight_events(
             for index, word in enumerate(group):
                 isolated = _render_token(word)
                 if index == active_index:
-                    isolated = f"{{\\c{highlight}}}{isolated}{{\\c{primary}}}"
+                    isolated = (
+                        f"{{\\c{highlight}{entrance}}}{isolated}"
+                        f"{{\\c{primary}{reset}}}"
+                    )
                 rendered.append(isolated)
             if rtl:
                 rendered = _rtl_highlight_segments(rendered, active_index)
-            text = entrance + " ".join(rendered)
+            text = " ".join(rendered)
             if not text.endswith(RLM):
                 text += RLM
             word_index = group_start + active_index
