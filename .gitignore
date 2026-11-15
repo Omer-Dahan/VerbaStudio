@@ -8,3 +8,15 @@ __pycache__/
 *.subtitled.mp4
 *.srt
 acceptance/*.mp4
+
+# agent tooling, not part of the project
+.claude/
+AGENTS.md
+CLAUDE.md
+.gitnexus/
+graphify-out/
+
+# commercial font families: kept locally, never redistributed
+fonts/AlmoniNeue/
+fonts/Ploni/
+fonts/Stanga/
