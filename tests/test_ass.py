@@ -68,7 +68,7 @@ def test_ass_uses_video_resolution_style_and_rtl_override(tmp_path: Path) -> Non
     assert "PlayResY: 1280" in content
     assert "WrapStyle: 0" in content
     assert "ScaledBorderAndShadow: yes" in content
-    assert "Style: Default,Ploni DL 1.1 AAA" in content
+    assert "Style: Default,Heebo," in content
     assert ",3,8,0,2,40,40,77,1" in content
     assert "&H73000000" in content
     assert "Dialogue: 0,0:00:01.23,0:00:04.57" in content
@@ -102,7 +102,7 @@ def test_reveal_ass_emits_short_groups_that_tile_the_sentence(tmp_path: Path) ->
         end_cs = _ass_centiseconds(end)
         assert end_cs - start_cs <= 250
         assert sum(int(value) for value in re.findall(r"\\k(\d+)", dialogue)) == end_cs - start_cs
-    assert "Style: Default,Ploni DL 1.1 AAA" in content
+    assert "Style: Default,Heebo," in content
     assert "&H00808080" in content
 
 
@@ -150,7 +150,9 @@ def test_box_caption_style_is_byte_for_byte_default(tmp_path: Path) -> None:
     write_ass(cues, explicit, 720, 1280, caption_style="box")
 
     assert default.read_bytes() == explicit.read_bytes()
-    assert "Style: Default,Ploni DL 1.1 AAA" in default.read_text(encoding="utf-8")
+    style, _ = _style_and_dialogues(explicit.read_text(encoding="utf-8"))
+    assert style.split(",")[1] == "Heebo"
+    assert "Style: Default,Heebo," in default.read_text(encoding="utf-8")
 
 
 def test_box_rtl_output_matches_caption_style_baseline(tmp_path: Path) -> None:
@@ -164,7 +166,7 @@ def test_box_rtl_output_matches_caption_style_baseline(tmp_path: Path) -> None:
     )
 
     assert hashlib.sha256(destination.read_bytes()).hexdigest() == (
-        "dcb6142bbfbb10ac4e5665840e1a207cfbe1f97e8f89869902402629e12252f6"
+        "878b07bc4630e34507f9e202e04b50b16973894859b1b3670ff730a2ca48d7fa"
     )
 
 

@@ -8,7 +8,7 @@ from hs.text import normalize_subtitle_text
 from hs.translate import split_translation
 
 
-DEFAULT_FONT = "Ploni DL 1.1 AAA"
+DEFAULT_FONT = "Heebo"
 LATIN_RUN = re.compile(
     r"(?=[A-Za-z0-9.,:%$+\-/& ]*[A-Za-z])"
     r"[A-Za-z0-9](?:[A-Za-z0-9]|[.,:%$+\-/&](?=[A-Za-z0-9])| (?=[A-Za-z0-9]))*"

@@ -138,7 +138,7 @@ updates as JSON Lines for an external process to follow.
 <td width="33%" valign="top">
 
 ### 🧪 Tested pipeline
-As of this writing, the repository test suite contains 245 passing
+As of this writing, the repository test suite contains 268 passing
 tests and 1 skipped test across transcription, layout, burn, and QA.
 </td>
 </tr>
@@ -277,7 +277,7 @@ The command line is the only management interface. It accepts one positional vid
 | `--ignore-caption-band` | Layout | Permit overlap with detected captions | Off |
 | `--caption-style` | Style | Visual preset | `box` |
 | `--caption-pop` | Style | CapCut entrance animation | `subtle` |
-| `--font` | Style | ASS font family | `Ploni DL 1.1 AAA` |
+| `--font` | Style | ASS font family | `Heebo` |
 | `--size-scale` | Style | Frame-derived font-size multiplier | `1.20` |
 | `--box-alpha` | Style | Box opacity; `0` uses outline | `0.55` |
 | `--outline` | Style | Outline width when box opacity is `0` | `2.0` |
@@ -347,4 +347,10 @@ granted through this repository.
 The project depends on the external `faster-whisper` project, an OpenAI-compatible
 translation server, ffmpeg/ffprobe, libass, FriBidi, and HarfBuzz. The optional
 `--glossary` file is user-supplied input and is not bundled or licen&#115;ed by this
-repository. Included fonts may carry their own upstream terms.
+repository.
+
+The repository bundles only font families under the OFL: Alef, Assistant, David
+Libre, Frank Ruhl Libre, Heebo, Open Sans Hebrew, and Rubik. Install these fonts
+system-wide: the tool resolves fonts through fontconfig, not from `fonts/`.
+Commercial families such as Almoni, Ploni, and Stanga are not distributed with the
+project.
