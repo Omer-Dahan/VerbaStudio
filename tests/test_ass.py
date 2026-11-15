@@ -8,6 +8,9 @@ import pytest
 from hs.ass import (
     LRI,
     PDI,
+    RLM,
+    _bidi_line,
+    _render_token,
     _ass_text,
     _rtl_highlight_segments,
     format_timestamp,
@@ -182,7 +185,9 @@ def test_capcut_caption_style_highlights_ordered_words(tmp_path: Path) -> None:
         re.search(r"\{\\c&H0000FFFF&[^}]*\}([^{} ]+)", event).group(1).replace("\u2066", "").replace("\u2069", "")
         for event in dialogues
     ]
-    assert active_words == cue.display_text.split()
+    assert active_words == [
+        RLM + word if word == "three" else word for word in cue.display_text.split()
+    ]
 
 
 def test_capcut_caption_style_uses_margin_override(tmp_path: Path) -> None:
@@ -576,9 +581,9 @@ def test_caption_styles_keep_q2_and_latin_isolation(tmp_path: Path, caption_styl
             "הגרסה נקראת 'Horizon Minecraft Java 26.3'.",
             "הגרסה נקראת \u2066Horizon Minecraft Java 26.3\u2069.\u200f",
         ),
-        ("Mojang's code.", "\u2066Mojangs code\u2069.\u200f"),
+        ("Mojang's code.", "\u200f\u2066Mojangs code\u2069.\u200f"),
         ("שוחרר ב-2026.", "שוחרר ב-2026.\u200f"),
-        ("(GPU) ו-VRAM", "(\u2066GPU\u2069) ו-\u2066VRAM\u2069\u200f"),
+        ("(GPU) ו-VRAM", "\u200f(\u2066GPU\u2069) ו-\u2066VRAM\u2069\u200f"),
         ("עברית בלבד", "עברית בלבד\u200f"),
     ],
 )
@@ -657,7 +662,7 @@ def test_oversized_token_stays_on_its_own_line() -> None:
 
     assert rendered.split(r"\N") == [
         "לפני\u200f",
-        f"\u2066{token}\u2069\u200f",
+        f"\u200f\u2066{token}\u2069\u200f",
         "אחרי\u200f",
     ]
 
@@ -678,7 +683,8 @@ def test_reported_numeric_bidi_regressions(text: str) -> None:
     assert "26\\N.3" not in rendered
     assert not set(QUOTE_CHARACTERS) & set(rendered)
     assert "\u200e" not in rendered
-    assert rendered.count("\u200f") == rendered.count(r"\N") + 1
+    lines = rendered.split(r"\N")
+    assert rendered.count(RLM) == len(lines) + sum(line.startswith(RLM) for line in lines)
     assert rendered.count("\u2066") == rendered.count("\u2069")
     assert plain.count("26.3") == 1
     for isolated in re.findall("\u2066(.*?)\u2069", rendered):
@@ -742,3 +748,60 @@ def test_vertical_ass_has_clear_margins_on_black_frame(tmp_path: Path) -> None:
     margins = render_black_frame_margins(destination, 576, 1024)
 
     assert all(margin >= 24 for margin in margins.values()), margins
+
+
+@pytest.mark.parametrize("caption_style", ["capcut", "broadcast"])
+@pytest.mark.parametrize("text", ["1,500", "בקרב 1,500 עובדים,"])
+def test_number_led_highlight_run_starts_with_one_rlm(
+    tmp_path: Path, caption_style: str, text: str
+) -> None:
+    destination = tmp_path / "number.ass"
+    write_ass(
+        [Cue(0, 1, "source", text)], destination, 720, 1280,
+        caption_style=caption_style,
+    )
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    event = dialogues[0]
+    body = re.sub(r"\{[^}]+\}", "", event.split(",", 9)[9])
+
+    assert body.startswith(RLM + "1,500")
+    assert len(body) - len(body.lstrip(RLM)) == 1
+    assert body.endswith(RLM)
+
+
+@pytest.mark.parametrize(
+    ("caption_style", "cue_style"),
+    [("box", "sentences"), ("box", "words"), ("card", "sentences")],
+)
+def test_number_led_single_run_starts_with_one_rlm(
+    tmp_path: Path, caption_style: str, cue_style: str
+) -> None:
+    destination = tmp_path / "number.ass"
+    write_ass(
+        [Cue(0, 1, "source", "1,500 עובדים בקרב")], destination, 720, 1280,
+        caption_style=caption_style, cue_style=cue_style,
+    )
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    body = re.sub(r"\{[^}]+\}", "", dialogues[0].split(",", 9)[9])
+
+    assert body == RLM + "1,500 עובדים בקרב" + RLM
+
+
+@pytest.mark.parametrize("render", [_render_token, _bidi_line])
+@pytest.mark.parametrize("first", ["1,500", "Latin", "$", "%", "("])
+def test_non_hebrew_start_gets_one_rlm_before_isolation(render, first: str) -> None:
+    rendered = render(first + " עובדים")
+    assert rendered.startswith(RLM)
+    assert not rendered.startswith(RLM * 2)
+    if first == "Latin":
+        assert rendered.startswith(RLM + LRI + "Latin")
+    assert render(RLM + first + " עובדים") == rendered
+
+
+@pytest.mark.parametrize("render", [_render_token, _bidi_line])
+def test_hebrew_led_run_with_internal_number_keeps_rlm_count(render) -> None:
+    before = render("בקרב הרבה עובדים,")
+    after = render("בקרב 1,500 עובדים,")
+
+    assert before.count(RLM) == after.count(RLM) == 1
+    assert after == "בקרב 1,500 עובדים," + RLM

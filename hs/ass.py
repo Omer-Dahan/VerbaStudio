@@ -437,6 +437,8 @@ def _karaoke_text(
 
 
 def _bidi_line(text: str) -> str:
+    if text and not text.startswith(RLM) and not HEBREW_LETTER.match(text):
+        text = RLM + text
     rendered = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", text)
     rendered = re.sub(
         rf"([{re.escape(TRAILING_RTL_PUNCTUATION)}])(?= |$)",
@@ -447,5 +449,7 @@ def _bidi_line(text: str) -> str:
 
 
 def _render_token(token: str) -> str:
+    if token and not token.startswith(RLM) and not HEBREW_LETTER.match(token):
+        token = RLM + token
     isolated = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", token)
     return isolated + RLM if token.endswith(tuple(TRAILING_RTL_PUNCTUATION)) else isolated
