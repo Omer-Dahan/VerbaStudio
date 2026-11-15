@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/preview-2-512.png" width="144" alt="VerbaStudio">
+<img src="assets/banner.png" alt="VerbaStudio" width="100%">
 
 ### VerbaStudio
 **From speech to subtitles. All on your device.**<br>
