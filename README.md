@@ -1,9 +1,9 @@
 <div align="center">
 
-<br>
+<img src="assets/preview-2-512.png" width="144" alt="VerbaStudio">
 
-### Hebrew Subtitles
-**Turn a video into a video with burned-in Hebrew subtitles.**<br>
+### VerbaStudio
+**From speech to subtitles. All on your device.**<br>
 A local command-line pipeline for word-timestamped transcription, Hebrew translation,
 RTL-aware ASS captions, ffmpeg burning, and subtitle QA.
 
@@ -174,6 +174,8 @@ model after transcription, and then creates the translation client.
 ## 🚀 Quick Start
 
 Management is command-line only. There is no GUI.
+
+Repository: [github.com/Omer-Dahan/VerbaStudio](https://github.com/Omer-Dahan/VerbaStudio).
 
 The repository has no install manifest. Create an environment and install its runtime
 imports directly until packaging metadata is added:
