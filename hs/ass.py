@@ -193,7 +193,7 @@ def _highlight_events(
         for active_index in range(len(group)):
             rendered = []
             for index, word in enumerate(group):
-                isolated = _render_token(word)
+                isolated = _render_token(word, rtl)
                 if index == active_index:
                     isolated = (
                         f"{{\\c{highlight}{entrance}}}{isolated}"
@@ -419,12 +419,13 @@ def _karaoke_text(
     rendered_lines: list[str] = []
     timing_index = 0
     for line in lines:
+        rtl = _line_is_rtl(line.split())
         rendered_words = []
         for token in line.split():
-            isolated = _render_token(token)
+            isolated = _render_token(token, rtl)
             rendered_words.append(f"{{\\k{timings[timing_index]}}}{isolated}")
             timing_index += 1
-        if _line_is_rtl(line.split()):
+        if rtl:
             rendered_words.reverse()
         rendered_line = " ".join(rendered_words)
         if not rendered_line.endswith(RLM):
@@ -437,7 +438,7 @@ def _karaoke_text(
 
 
 def _bidi_line(text: str) -> str:
-    if text and not text.startswith(RLM) and not HEBREW_LETTER.match(text):
+    if _line_is_rtl(text.split()) and text and not text.startswith(RLM) and not HEBREW_LETTER.match(text):
         text = RLM + text
     rendered = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", text)
     rendered = re.sub(
@@ -448,8 +449,8 @@ def _bidi_line(text: str) -> str:
     return rendered if rendered.endswith(RLM) else rendered + RLM
 
 
-def _render_token(token: str) -> str:
-    if token and not token.startswith(RLM) and not HEBREW_LETTER.match(token):
+def _render_token(token: str, rtl: bool) -> str:
+    if rtl and token and not token.startswith(RLM) and not HEBREW_LETTER.match(token):
         token = RLM + token
     isolated = LATIN_RUN.sub(lambda match: f"{LRI}{match.group()}{PDI}", token)
     return isolated + RLM if token.endswith(tuple(TRAILING_RTL_PUNCTUATION)) else isolated

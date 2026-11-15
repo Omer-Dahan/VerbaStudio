@@ -581,9 +581,9 @@ def test_caption_styles_keep_q2_and_latin_isolation(tmp_path: Path, caption_styl
             "הגרסה נקראת 'Horizon Minecraft Java 26.3'.",
             "הגרסה נקראת \u2066Horizon Minecraft Java 26.3\u2069.\u200f",
         ),
-        ("Mojang's code.", "\u200f\u2066Mojangs code\u2069.\u200f"),
+        ("Mojang's code.", "\u2066Mojangs code\u2069.\u200f"),
         ("שוחרר ב-2026.", "שוחרר ב-2026.\u200f"),
-        ("(GPU) ו-VRAM", "\u200f(\u2066GPU\u2069) ו-\u2066VRAM\u2069\u200f"),
+        ("(GPU) ו-VRAM", "(\u2066GPU\u2069) ו-\u2066VRAM\u2069\u200f"),
         ("עברית בלבד", "עברית בלבד\u200f"),
     ],
 )
@@ -662,7 +662,7 @@ def test_oversized_token_stays_on_its_own_line() -> None:
 
     assert rendered.split(r"\N") == [
         "לפני\u200f",
-        f"\u200f\u2066{token}\u2069\u200f",
+        f"\u2066{token}\u2069\u200f",
         "אחרי\u200f",
     ]
 
@@ -751,7 +751,7 @@ def test_vertical_ass_has_clear_margins_on_black_frame(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("caption_style", ["capcut", "broadcast"])
-@pytest.mark.parametrize("text", ["1,500", "בקרב 1,500 עובדים,"])
+@pytest.mark.parametrize("text", ["עובדים 1,500", "בקרב 1,500 עובדים,"])
 def test_number_led_highlight_run_starts_with_one_rlm(
     tmp_path: Path, caption_style: str, text: str
 ) -> None:
@@ -767,6 +767,8 @@ def test_number_led_highlight_run_starts_with_one_rlm(
     assert body.startswith(RLM + "1,500")
     assert len(body) - len(body.lstrip(RLM)) == 1
     assert body.endswith(RLM)
+    expected = "1,500 עובדים" if text == "עובדים 1,500" else "1,500 עובדים," + RLM + " בקרב"
+    assert body == RLM + expected + RLM
 
 
 @pytest.mark.parametrize(
@@ -790,18 +792,42 @@ def test_number_led_single_run_starts_with_one_rlm(
 @pytest.mark.parametrize("render", [_render_token, _bidi_line])
 @pytest.mark.parametrize("first", ["1,500", "Latin", "$", "%", "("])
 def test_non_hebrew_start_gets_one_rlm_before_isolation(render, first: str) -> None:
-    rendered = render(first + " עובדים")
+    kwargs = {"rtl": True} if render is _render_token else {}
+    rendered = render(first + " עובדים", **kwargs)
     assert rendered.startswith(RLM)
     assert not rendered.startswith(RLM * 2)
     if first == "Latin":
         assert rendered.startswith(RLM + LRI + "Latin")
-    assert render(RLM + first + " עובדים") == rendered
+    assert render(RLM + first + " עובדים", **kwargs) == rendered
 
 
 @pytest.mark.parametrize("render", [_render_token, _bidi_line])
 def test_hebrew_led_run_with_internal_number_keeps_rlm_count(render) -> None:
-    before = render("בקרב הרבה עובדים,")
-    after = render("בקרב 1,500 עובדים,")
+    kwargs = {"rtl": True} if render is _render_token else {}
+    before = render("בקרב הרבה עובדים,", **kwargs)
+    after = render("בקרב 1,500 עובדים,", **kwargs)
 
     assert before.count(RLM) == after.count(RLM) == 1
     assert after == "בקרב 1,500 עובדים," + RLM
+
+
+@pytest.mark.parametrize("caption_style", ["box", "capcut", "card", "broadcast"])
+def test_latin_cue_has_no_leading_rlm(tmp_path: Path, caption_style: str) -> None:
+    destination = tmp_path / "latin.ass"
+    write_ass(
+        [Cue(0, 1, "this test", "this test")], destination, 720, 1280,
+        caption_style=caption_style, caption_pop="off",
+    )
+    _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    bodies = [event.split(",", 9)[9] for event in dialogues]
+    for body in bodies:
+        plain = re.sub(r"\{[^}]+\}", "", body)
+        assert not any(token.startswith(RLM) for token in plain.split())
+        assert plain.replace(LRI, "").replace(PDI, "").replace(RLM, "") == "this test"
+    if caption_style == "capcut":
+        assert bodies == [
+            r"{\q2}{\c&H0000FFFF&}" + LRI + "this" + PDI
+            + r"{\c&H00FFFFFF&} " + LRI + "test" + PDI + RLM,
+            r"{\q2}" + LRI + "this" + PDI + r" {\c&H0000FFFF&}"
+            + LRI + "test" + PDI + r"{\c&H00FFFFFF&}" + RLM,
+        ]
