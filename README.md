@@ -19,6 +19,7 @@ RTL-aware ASS captions, ffmpeg burning, and subtitle QA.
 ![Language](https://img.shields.io/badge/Python-3-3776AB?style=flat-square&logo=python&logoColor=white)
 ![Interface](https://img.shields.io/badge/Interface-CLI-0088CC?style=flat-square)
 ![Subtitles](https://img.shields.io/badge/Subtitles-ASS_RTL-6D28D9?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-3DA639?style=flat-square)
 </div>
 
 ---
@@ -51,7 +52,7 @@ RTL-aware ASS captions, ffmpeg burning, and subtitle QA.
 
 - [💡 Design Decisions](#-design-decisions)
 - [⚠️ Known Limitations](#️-known-limitations)
-- 📜 Licen&#115;e & Credits
+- 📜 License & Credits
 
 </td>
 </tr>
@@ -341,14 +342,15 @@ tests/                   Unit and integration-style pipeline tests
 
 ---
 
-## 📜 Licen&#115;e & Credits
+## 📜 License & Credits
 
-No licen&#115;e file has been added yet. Until the owner adds one, no licen&#115;e is
-granted through this repository.
+Released under the [MIT License](LICENSE): you may use, modify, and redistribute this
+project, including commercially, as long as the copyright notice and this license
+travel with it. The software is provided as is, without warranty.
 
 The project depends on the external `faster-whisper` project, an OpenAI-compatible
 translation server, ffmpeg/ffprobe, libass, FriBidi, and HarfBuzz. The optional
-`--glossary` file is user-supplied input and is not bundled or licen&#115;ed by this
+`--glossary` file is user-supplied input and is not bundled or licensed by this
 repository.
 
 The repository bundles only font families under the OFL: Alef, Assistant, David
