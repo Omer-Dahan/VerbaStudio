@@ -92,11 +92,12 @@ def write_ass(
             margin_v = round(height * 0.08)
         else:
             alignment = 2
-            margin_v = (
-                round(height * margin_scale)
-                if margin_v_override is None
-                else margin_v_override
-            )
+            if margin_v_override is not None:
+                margin_v = margin_v_override
+            elif position in {"auto", "above"} and caption_band:
+                _, margin_v = subtitle_layout(height, caption_band, position, margin_v_override)
+            else:
+                margin_v = round(height * margin_scale)
     header = f"""[Script Info]
 ScriptType: v4.00+
 PlayResX: {width}

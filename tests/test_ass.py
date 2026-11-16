@@ -242,6 +242,59 @@ def test_capcut_top_position_wins_over_margin_override(tmp_path: Path) -> None:
     assert fields[21] == "82"
 
 
+@pytest.mark.parametrize("caption_style", ["card", "broadcast"])
+def test_card_and_broadcast_clear_the_caption_band_like_box(
+    tmp_path: Path, caption_style: str
+) -> None:
+    caption_band = [85, 97]
+
+    box_destination = tmp_path / "box.ass"
+    write_ass(
+        [Cue(0, 1, "one", "אחד")],
+        box_destination,
+        1920,
+        1080,
+        caption_style="box",
+        caption_band=caption_band,
+    )
+    box_style, _ = _style_and_dialogues(box_destination.read_text(encoding="utf-8"))
+    box_margin_v = int(box_style.split(",")[21])
+
+    destination = tmp_path / f"{caption_style}.ass"
+    write_ass(
+        [Cue(0, 1, "one", "אחד")],
+        destination,
+        1920,
+        1080,
+        caption_style=caption_style,
+        caption_band=caption_band,
+    )
+    style, _ = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    margin_v = int(style.split(",")[21])
+
+    assert margin_v == box_margin_v
+    band_top_px = round(1080 * caption_band[0] / 100)
+    assert 1080 - margin_v <= band_top_px
+
+
+@pytest.mark.parametrize("caption_style", ["box", "card", "broadcast"])
+def test_margin_v_override_wins_over_caption_band_for_every_style(
+    tmp_path: Path, caption_style: str
+) -> None:
+    destination = tmp_path / f"{caption_style}.ass"
+    write_ass(
+        [Cue(0, 1, "one", "אחד")],
+        destination,
+        1920,
+        1080,
+        caption_style=caption_style,
+        caption_band=[85, 97],
+        margin_v_override=120,
+    )
+    style, _ = _style_and_dialogues(destination.read_text(encoding="utf-8"))
+    assert style.split(",")[21] == "120"
+
+
 def _plain_event_tokens(event: str) -> list[str]:
     text = event.rsplit(",,", 1)[1]
     text = re.sub(r"\{[^}]+\}|[\u200e\u200f\u2066\u2069]", "", text)
