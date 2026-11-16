@@ -283,7 +283,7 @@ class TranslationClient:
             if is_sane_translation(substituted, output) and all(
                 token.casefold() in output.casefold() for token in protected
             ):
-                return output.strip('"').strip()
+                return strip_markdown_emphasis(output.strip('"').strip())
         if protected:
             prompt = build_prompt(source, source_lang, source_code, gender=gender)
             try:
@@ -301,7 +301,7 @@ class TranslationClient:
             except (ValueError, KeyError, json.JSONDecodeError):
                 return None
             if is_sane_translation(source, output):
-                return output.strip('"').strip()
+                return strip_markdown_emphasis(output.strip('"').strip())
         return None
 
     def _complete_with_retries(self, *args, **kwargs) -> str:
@@ -461,6 +461,15 @@ def apply_glossary(text: str, glossary: dict[str, str]) -> str:
     for original in sorted(glossary, key=len, reverse=True):
         text = text.replace(original, glossary[original])
     return text
+
+
+_MARKDOWN_EMPHASIS_RE = re.compile(r"(\*\*|__|\*|`)(.+?)\1")
+_MARKDOWN_LIST_MARKER_RE = re.compile(r"^(?:[-*]\s+|\d+\.\s+)")
+
+
+def strip_markdown_emphasis(text: str) -> str:
+    cleaned = _MARKDOWN_EMPHASIS_RE.sub(lambda match: match.group(2), text)
+    return _MARKDOWN_LIST_MARKER_RE.sub("", cleaned)
 
 
 def _language_name(code: str) -> str:

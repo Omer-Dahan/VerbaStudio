@@ -20,6 +20,7 @@ from hs.translate import (
     server_is_healthy,
     should_passthrough,
     split_translation,
+    strip_markdown_emphasis,
 )
 
 
@@ -381,6 +382,14 @@ def test_glossary_is_deterministic_and_validated(tmp_path: Path) -> None:
 
     glossary = load_glossary(path)
     assert apply_glossary("טיסה לניו יורק", glossary) == "טיסה לנ״י"
+
+
+def test_strip_markdown_emphasis_removes_wrapping_markers_only() -> None:
+    assert strip_markdown_emphasis("**שלום** עולם") == "שלום עולם"
+    assert strip_markdown_emphasis("*כן*") == "כן"
+    assert strip_markdown_emphasis('הוא אמר "לא"') == 'הוא אמר "לא"'
+    assert strip_markdown_emphasis("2*3") == "2*3"
+    assert strip_markdown_emphasis("כתבו את השירות ב-**Rust**") == "כתבו את השירות ב-Rust"
 
 
 def test_default_glossary_preserves_rust_and_minecraft() -> None:
