@@ -20,3 +20,6 @@ graphify-out/
 fonts/AlmoniNeue/
 fonts/Ploni/
 fonts/Stanga/
+
+# agent scratch
+.agent-progress.md
