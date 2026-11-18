@@ -52,6 +52,16 @@ def test_defaults_fit_sixteen_gigabyte_gpu() -> None:
     assert "fits 16GB" in " ".join(build_parser().format_help().split())
 
 
+def test_unknown_source_language_lists_supported_codes(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as error:
+        main(["source.mp4", "--language", "xx"])
+
+    assert error.value.code != 0
+    stderr = capsys.readouterr().err
+    assert "unsupported source language 'xx'" in stderr
+    assert "supported codes: ar, de, en, es, fr, he, it, pt, ro, ru, tr, uk" in stderr
+
+
 def test_clause_style_and_ignore_caption_band_parse() -> None:
     args = build_parser().parse_args(
         [
@@ -219,7 +229,13 @@ def test_legacy_output_is_recognized_from_cached_artifact(
     assert _matches_known_output(copy) is True
 
 
+@pytest.mark.parametrize(
+    ("language_args", "expected_language"),
+    [([], "en"), (["--language", "ar"], "ar")],
+)
 def test_json_success_is_parseable_and_has_required_shape(
+    language_args: list[str],
+    expected_language: str,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -253,10 +269,11 @@ def test_json_success_is_parseable_and_has_required_shape(
             ),
         ),
     ):
-        exit_code = main([str(video), "--json", "--dry-run"])
+        exit_code = main([str(video), "--json", "--dry-run", *language_args])
 
     manifest = json.loads(capsys.readouterr().out)
     assert exit_code == 0
+    assert manifest["lang"] == expected_language
     assert manifest["qa"]["passthrough"] == 1
     assert manifest["ok"] is True
     assert set(manifest) == {

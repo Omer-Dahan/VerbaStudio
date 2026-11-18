@@ -12,6 +12,7 @@ from hs.models import Cue
 from hs.translate import (
     PROMPT_TEMPLATE,
     TranslationClient,
+    _language_name,
     apply_glossary,
     build_prompt,
     is_sane_translation,
@@ -33,6 +34,20 @@ def test_official_prompt_has_quoted_text_after_two_newlines() -> None:
         text='"How are you?"',
     )
     assert prompt.endswith('\n\n"How are you?"')
+
+
+def test_arabic_source_language_name_and_prompt() -> None:
+    language = _language_name("ar")
+
+    assert language == "Arabic"
+    prompt = build_prompt("مرحبا", language, "ar")
+    assert "Arabic (ar) to Hebrew (he-IL)" in prompt
+    assert prompt.endswith('"مرحبا"')
+
+
+def test_unknown_source_language_raises() -> None:
+    with pytest.raises(ValueError, match="Unsupported source language: xx"):
+        _language_name("xx")
 
 
 def test_hebrew_clause_split_preserves_every_character_and_punctuation() -> None:

@@ -15,6 +15,20 @@ from hs.models import Cue
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8189"
 DEFAULT_GLOSSARY_PATH = Path(__file__).resolve().parent.parent / "data" / "glossary.yml"
+SOURCE_LANGUAGES = {
+    "ar": "Arabic",
+    "de": "German",
+    "en": "English",
+    "es": "Spanish",
+    "fr": "French",
+    "he": "Hebrew",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "ro": "Romanian",
+    "ru": "Russian",
+    "tr": "Turkish",
+    "uk": "Ukrainian",
+}
 HEBREW = re.compile(r"[\u0590-\u05ff]")
 LATIN_RUN = re.compile(r"[A-Za-z][A-Za-z0-9.+#'’-]*")
 LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
@@ -451,7 +465,7 @@ def apply_glossary(text: str, glossary: dict[str, str]) -> str:
 
 def _language_name(code: str) -> str:
     try:
-        return {"en": "English", "he": "Hebrew"}[code]
+        return SOURCE_LANGUAGES[code]
     except KeyError as error:
         raise ValueError(f"Unsupported source language: {code}") from error
 

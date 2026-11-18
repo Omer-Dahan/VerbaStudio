@@ -38,6 +38,7 @@ from hs.transcribe import DEFAULT_MODEL, transcribe
 from hs.translate import (
     DEFAULT_BASE_URL,
     DEFAULT_GLOSSARY_PATH,
+    SOURCE_LANGUAGES,
     TranslationClient,
     server_is_healthy,
     split_translation,
@@ -65,7 +66,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MODEL,
         help=f"ASR model (default: {DEFAULT_MODEL})",
     )
-    parser.add_argument("--language", choices=("en", "he"))
+    parser.add_argument(
+        "--language", type=_source_language, help="Source language code (default: auto-detect)"
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
         "--compute-type",
@@ -692,6 +695,15 @@ def resolve_output_path(video: Path, output: str | None) -> Path:
     raise ValueError(
         "output must be an existing directory, a path ending in '/', or an .mp4 file"
     )
+
+
+def _source_language(code: str) -> str:
+    if code not in SOURCE_LANGUAGES:
+        supported = ", ".join(SOURCE_LANGUAGES)
+        raise argparse.ArgumentTypeError(
+            f"unsupported source language {code!r}; supported codes: {supported}"
+        )
+    return code
 
 
 def _positive_float(value: str) -> float:
