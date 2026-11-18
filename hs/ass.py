@@ -188,33 +188,73 @@ def _highlight_events(
         "normal": r"\fscx100\fscy100",
     }[caption_pop] if caption_style == "capcut" else ""
     events: list[str] = []
-    for group_start in range(0, len(words), 3):
-        group = words[group_start : group_start + 3]
-        rtl = _line_is_rtl(group)
-        for active_index in range(len(group)):
-            rendered = []
-            for index, word in enumerate(group):
-                isolated = _render_token(word, rtl)
-                if index == active_index:
-                    isolated = (
-                        f"{{\\c{highlight}{entrance}}}{isolated}"
+    screen_start = 0
+    for lines in _highlight_screens(words, max_chars):
+        screen_end = screen_start + sum(len(line.split()) for line in lines)
+        for word_index in range(screen_start, screen_end):
+            rendered_lines = []
+            line_start = screen_start
+            for line in lines:
+                tokens = line.split()
+                rtl = _line_is_rtl(tokens)
+                rendered = [_render_token(word, rtl) for word in tokens]
+                active_index = word_index - line_start
+                if 0 <= active_index < len(tokens):
+                    rendered[active_index] = (
+                        f"{{\\c{highlight}{entrance}}}{rendered[active_index]}"
                         f"{{\\c{primary}{reset}}}"
                     )
-                rendered.append(isolated)
-            if rtl:
-                rendered = _rtl_highlight_segments(rendered, active_index)
-            text = " ".join(rendered)
-            if not text.endswith(RLM):
-                text += RLM
-            word_index = group_start + active_index
+                    if rtl:
+                        rendered = _rtl_highlight_segments(rendered, active_index)
+                text = " ".join(rendered)
+                rendered_lines.append(text if text.endswith(RLM) else text + RLM)
+                line_start += len(tokens)
             events.append(
                 _dialogue(
                     (start_cs + boundaries[word_index]) / 100,
                     (start_cs + boundaries[word_index + 1]) / 100,
-                    text,
+                    r"\N".join(rendered_lines),
                 )
             )
+        screen_start = screen_end
     return events
+
+
+def _highlight_screens(words: list[str], max_chars: int) -> list[list[str]]:
+    lines = _wrap_tokens(words, max_chars)
+    if len(lines) <= 2:
+        return [lines]
+
+    # Score suffixes by width exceptions, screen count, then uneven word counts.
+    count = len(words)
+    scores = [(count, count, count * count)] * count + [(0, 0, 0)]
+    screens: dict[int, tuple[int, list[str]]] = {}
+    for start in range(count - 2, -1, -1):
+        for end in range(start + 2, count + 1):
+            if end == count - 1:
+                continue
+            size = end - start
+            lines = _wrap_tokens(words[start:end], max_chars)
+            overflow = len(lines) > 2
+            if overflow:
+                if size > 3:
+                    break
+                # An odd run of words that each fill a line needs one wider line.
+                first, middle, last = lines
+                width = min(len(first) + len(middle), len(middle) + len(last)) + 1
+                lines = _wrap_tokens(words[start:end], width)
+            exceptions, screen_count, imbalance = scores[end]
+            score = (exceptions + overflow, screen_count + 1, imbalance + size**2)
+            if score <= scores[start]:
+                scores[start] = score
+                screens[start] = end, lines
+
+    result = []
+    start = 0
+    while start < count:
+        start, lines = screens[start]
+        result.append(lines)
+    return result
 
 
 def _rtl_highlight_segments(rendered: list[str], active_index: int) -> list[str]:

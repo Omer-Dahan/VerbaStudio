@@ -10,6 +10,7 @@ from hs.ass import (
     PDI,
     RLM,
     _bidi_line,
+    _highlight_events,
     _render_token,
     _ass_text,
     _rtl_highlight_segments,
@@ -301,6 +302,53 @@ def _plain_event_tokens(event: str) -> list[str]:
     return text.split()
 
 
+def test_capcut_events_show_all_seven_words() -> None:
+    words = "אחד שני שלישי רביעי חמישי שישי שביעי".split()
+    cue = Cue(0, 3.5, "source", " ".join(words))
+
+    events = _highlight_events(cue, 60, 60, "capcut", "subtle")
+
+    assert len(events) == len(words)
+    for event in events:
+        assert sorted(_plain_event_tokens(event)) == sorted(words)
+
+
+def test_capcut_highlights_the_active_word_on_either_wrapped_line() -> None:
+    cue = Cue(0, 2, "source", "אחד שני. שלישי רביעי,")
+    events = _highlight_events(cue, 13, 60, "capcut", "off")
+    opening = r"{\c&H0000FFFF&}"
+    closing = r"{\c&H00FFFFFF&}"
+    expected = [
+        (f"שני.{RLM} {opening}אחד{closing}{RLM}", f"שלישי רביעי,{RLM}"),
+        (f"{opening}שני.{RLM}{closing} אחד{RLM}", f"שלישי רביעי,{RLM}"),
+        (f"אחד שני.{RLM}", f"רביעי,{RLM} {opening}שלישי{closing}{RLM}"),
+        (f"אחד שני.{RLM}", f"{opening}רביעי,{RLM}{closing} שלישי{RLM}"),
+    ]
+
+    assert [event.split(",", 9)[9] for event in events] == [
+        r"{\q2}" + r"\N".join(lines) for lines in expected
+    ]
+
+
+@pytest.mark.parametrize(("max_chars", "screen_sizes"), [(8, [4, 3]), (2, [3, 2, 2])])
+def test_capcut_balances_overflow_screens_without_single_words(
+    max_chars: int, screen_sizes: list[int]
+) -> None:
+    words = "אב גד הו זח טי כל מנ".split()
+    cue = Cue(0, 3.5, "source", " ".join(words))
+    events = _highlight_events(cue, max_chars, 60, "capcut", "off")
+
+    assert len(events) == len(words)
+    offset = 0
+    for size in screen_sizes:
+        for event in events[offset : offset + size]:
+            assert event.count(r"\N") <= 1
+            assert sorted(_plain_event_tokens(event.replace(r"\N", " "))) == sorted(
+                words[offset : offset + size]
+            )
+        offset += size
+
+
 def test_capcut_rtl_events_emit_highlight_runs_in_visual_order(tmp_path: Path) -> None:
     destination = tmp_path / "capcut.ass"
     write_ass(
@@ -311,6 +359,9 @@ def test_capcut_rtl_events_emit_highlight_runs_in_visual_order(tmp_path: Path) -
         caption_style="capcut",
     )
 
+    assert hashlib.sha256(destination.read_bytes()).hexdigest() == (
+        "61796414bbd09090a76d5c7c9908fb7bfc389adbed8b3f47a958918237037f8e"
+    )
     _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
     event_texts = [
         event.rsplit(r"{\q2}", 1)[1].removesuffix("\u200f")
@@ -812,7 +863,7 @@ def test_number_led_highlight_run_starts_with_one_rlm(
 ) -> None:
     destination = tmp_path / "number.ass"
     write_ass(
-        [Cue(0, 1, "source", text)], destination, 720, 1280,
+        [Cue(0, 1, "source", text)], destination, 840, 1280,
         caption_style=caption_style,
     )
     _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
