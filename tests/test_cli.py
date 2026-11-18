@@ -41,7 +41,7 @@ def test_defaults_fit_sixteen_gigabyte_gpu() -> None:
     assert args.compute_type == "int8_float16"
     assert args.size_scale == 1.20
     assert args.box_alpha == 0.55
-    assert args.caption_style == "box"
+    assert args.caption_style == "capcut"
     assert args.caption_pop == "subtle"
     assert args.outline == 2.0
     assert args.min_cue_duration == 0.40
@@ -320,8 +320,16 @@ def test_keep_manifest_lists_persisted_artifacts(
         assert main([
             str(video), "-o", str(output), "--json", "--dry-run", "--keep",
         ]) == 0
+        manifest = json.loads(capsys.readouterr().out)
 
-    manifest = json.loads(capsys.readouterr().out)
+        box_output = tmp_path / "box.mp4"
+        box_video = tmp_path / "box-source.mp4"
+        box_video.write_bytes(b"box source")
+        assert main([
+            str(box_video), "-o", str(box_output), "--json", "--dry-run", "--keep",
+            "--caption-style", "box",
+        ]) == 0
+
     assert manifest["persisted"] is True
     assert manifest["artifacts"] == [
         str(output.with_suffix(".ass")),
@@ -329,6 +337,20 @@ def test_keep_manifest_lists_persisted_artifacts(
         str(output.with_suffix(".qa.json")),
         str(output.with_suffix(".qa.md")),
     ]
+    for ass_path, font, colours, border_style in (
+        (output.with_suffix(".ass"), "Heebo Black",
+         ["&H00FFFFFF", "&H0000FFFF", "&H00000000", "&H80000000"], "1"),
+        (box_output.with_suffix(".ass"), "Heebo",
+         ["&H00FFFFFF", "&H000000FF", "&H00000000", "&H73000000"], "3"),
+    ):
+        style = next(
+            line for line in ass_path.read_text(encoding="utf-8").splitlines()
+            if line.startswith("Style: Default,")
+        )
+        fields = style.split(",")
+        assert fields[1] == font
+        assert fields[3:7] == colours
+        assert fields[15] == border_style
 
 
 def test_asr_model_is_released_before_translation_client_is_constructed(

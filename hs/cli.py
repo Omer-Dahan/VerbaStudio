@@ -161,8 +161,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--caption-style",
         choices=("box", "capcut", "card", "broadcast"),
-        default="box",
-        help="Visual caption preset (default: box)",
+        default="capcut",
+        help="Visual caption preset (default: %(default)s)",
     )
     parser.add_argument(
         "--caption-pop",

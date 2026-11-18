@@ -139,7 +139,7 @@ updates as JSON Lines for an external process to follow.
 <td width="33%" valign="top">
 
 ### 🧪 Tested pipeline
-As of this writing, the repository test suite contains 268 passing
+As of this writing, the repository test suite contains 282 passing
 tests and 1 skipped test across transcription, layout, burn, and QA.
 </td>
 </tr>
@@ -241,7 +241,7 @@ The command line is the only management interface. It accepts one positional vid
 
 **Caption style**
 
-- `--caption-style` selects `box`, `capcut`, `card`, or `broadcast`.
+- `--caption-style` defaults to `capcut` and also accepts `box`, `card`, or `broadcast`.
 - `--caption-pop` controls the CapCut per-word entrance animation.
 - `--font`, `--size-scale`, `--box-alpha`, and `--outline` control ASS appearance.
 
@@ -278,7 +278,7 @@ The command line is the only management interface. It accepts one positional vid
 | `--position` | Layout | Vertical placement | `auto` |
 | `--margin-v` | Layout | ASS vertical margin override | None |
 | `--ignore-caption-band` | Layout | Permit overlap with detected captions | Off |
-| `--caption-style` | Style | Visual preset | `box` |
+| `--caption-style` | Style | Visual preset | `capcut` |
 | `--caption-pop` | Style | CapCut entrance animation | `subtle` |
 | `--font` | Style | ASS font family | `Heebo` |
 | `--size-scale` | Style | Frame-derived font-size multiplier | `1.20` |
