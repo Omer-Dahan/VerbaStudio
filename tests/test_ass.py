@@ -181,7 +181,7 @@ def test_capcut_caption_style_highlights_ordered_words(tmp_path: Path) -> None:
     assert fields[1] == "Heebo Black"
     assert fields[15] == "1"
     assert float(fields[16]) > 3
-    assert all(r"\fscx97" in event and r"\c&H0000FFFF&" in event for event in dialogues)
+    assert all(r"\bord12" in event and r"\c&H0000FFFF&" in event for event in dialogues)
     windows = [re.match(r"Dialogue: 0,([^,]+),([^,]+),", event).groups() for event in dialogues]
     assert all(_ass_centiseconds(left[1]) <= _ass_centiseconds(right[0]) for left, right in zip(windows, windows[1:]))
     active_words = [
@@ -306,7 +306,7 @@ def test_capcut_events_show_all_seven_words() -> None:
     words = "אחד שני שלישי רביעי חמישי שישי שביעי".split()
     cue = Cue(0, 3.5, "source", " ".join(words))
 
-    events = _highlight_events(cue, 60, 60, "capcut", "subtle")
+    events = _highlight_events(cue, 60, 60, "capcut", "subtle", 7)
 
     assert len(events) == len(words)
     for event in events:
@@ -315,7 +315,7 @@ def test_capcut_events_show_all_seven_words() -> None:
 
 def test_capcut_highlights_the_active_word_on_either_wrapped_line() -> None:
     cue = Cue(0, 2, "source", "אחד שני. שלישי רביעי,")
-    events = _highlight_events(cue, 13, 60, "capcut", "off")
+    events = _highlight_events(cue, 13, 60, "capcut", "off", 7)
     opening = r"{\c&H0000FFFF&}"
     closing = r"{\c&H00FFFFFF&}"
     expected = [
@@ -336,7 +336,7 @@ def test_capcut_balances_overflow_screens_without_single_words(
 ) -> None:
     words = "אב גד הו זח טי כל מנ".split()
     cue = Cue(0, 3.5, "source", " ".join(words))
-    events = _highlight_events(cue, max_chars, 60, "capcut", "off")
+    events = _highlight_events(cue, max_chars, 60, "capcut", "off", 7)
 
     assert len(events) == len(words)
     offset = 0
@@ -360,18 +360,15 @@ def test_capcut_rtl_events_emit_highlight_runs_in_visual_order(tmp_path: Path) -
     )
 
     assert hashlib.sha256(destination.read_bytes()).hexdigest() == (
-        "61796414bbd09090a76d5c7c9908fb7bfc389adbed8b3f47a958918237037f8e"
+        "68d782ff269b6fb32bf34b0d780777ed7f51ccfeee118d030c6c72b7792271cd"
     )
     _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
     event_texts = [
         event.rsplit(r"{\q2}", 1)[1].removesuffix("\u200f")
         for event in dialogues
     ]
-    opening = (
-        r"{\c&H0000FFFF&\fscx97\fscy97"
-        r"\t(0,90,\fscx101.5\fscy101.5)\t(90,140,\fscx100\fscy100)}"
-    )
-    closing = r"{\c&H00FFFFFF&\fscx100\fscy100}"
+    opening = r"{\c&H0000FFFF&\bord12\t(0,120,\bord9)}"
+    closing = r"{\c&H00FFFFFF&\bord9}"
     assert event_texts == [
         "רוצה בעל.\u200f " + opening + "אני" + closing,
         "בעל.\u200f " + opening + "רוצה" + closing + " אני",
@@ -442,6 +439,13 @@ def test_capcut_ltr_events_keep_logical_token_order(tmp_path: Path) -> None:
 
     _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
     assert all(_plain_event_tokens(event) == ["one", "two", "three"] for event in dialogues)
+    event_texts = [event.split(",", 9)[9] for event in dialogues]
+    stripped = [re.sub(r"\{\\c[^}]*\}", "", text) for text in event_texts]
+    assert stripped == [stripped[0]] * 3
+    assert [
+        re.search(r"\{\\c&H0000FFFF&[^}]*\}" + LRI + r"(\w+)" + PDI, text)[1]
+        for text in event_texts
+    ] == ["one", "two", "three"]
 
 
 def test_capcut_mixed_rtl_events_preserve_latin_isolation(tmp_path: Path) -> None:
@@ -477,7 +481,7 @@ def test_capcut_rtl_reordering_keeps_each_word_and_overrides(tmp_path: Path) -> 
     _, dialogues = _style_and_dialogues(destination.read_text(encoding="utf-8"))
     for event in dialogues:
         assert sorted(_plain_event_tokens(event)) == sorted(words)
-        assert event.count(r"\fscx97") == 1
+        assert event.count(r"\bord12") == 1
         assert event.count(r"\c&H0000FFFF&") == 1
         assert event.count(r"\c&H00FFFFFF&") == 1
 
@@ -558,15 +562,15 @@ def test_capcut_and_broadcast_use_the_same_asr_windows(tmp_path: Path) -> None:
         ("off", "", r"{\c&H00FFFFFF&}", (r"\t", r"\fscx", r"\alpha")),
         (
             "subtle",
-            r"\fscx97\fscy97\t(0,90,\fscx101.5\fscy101.5)\t(90,140,\fscx100\fscy100)",
-            r"{\c&H00FFFFFF&\fscx100\fscy100}",
-            (),
+            r"\bord12\t(0,120,\bord9)",
+            r"{\c&H00FFFFFF&\bord9}",
+            (r"\fscx", r"\fscy", r"\fsp"),
         ),
         (
             "fade",
             r"\alpha&HFF&\t(0,90,\alpha&H00&)",
             r"{\c&H00FFFFFF&\alpha&H00&}",
-            (r"\fscx",),
+            (r"\fscx", r"\fscy", r"\bord"),
         ),
         (
             "normal",
@@ -604,10 +608,6 @@ def test_capcut_caption_pop_modes(
         for event in dialogues
     )
     assert all(marker not in event for marker in excluded for event in dialogues)
-    if caption_pop == "subtle":
-        scales = [float(value) for event in dialogues for value in re.findall(r"\\fsc[xy]([\d.]+)", event)]
-        assert min(scales) >= 96
-        assert max(scales) <= 101.5
 
 
 def test_capcut_default_pop_is_subtle_and_modes_keep_event_decomposition(

@@ -117,7 +117,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             event
             for cue in cues
             for event in _highlight_events(
-                cue, max_chars, font_size, caption_style, caption_pop
+                cue, max_chars, font_size, caption_style, caption_pop, style_outline
             )
         ]
     elif caption_style == "card":
@@ -158,6 +158,7 @@ def _highlight_events(
     font_size: int,
     caption_style: str,
     caption_pop: str,
+    style_outline: float,
 ) -> list[str]:
     words = (
         normalize_subtitle_text(cue.display_text)
@@ -176,14 +177,14 @@ def _highlight_events(
     primary = "&H00FFFFFF&" if caption_style == "capcut" else "&H00000000&"
     entrances = {
         "off": "",
-        "subtle": r"\fscx97\fscy97\t(0,90,\fscx101.5\fscy101.5)\t(90,140,\fscx100\fscy100)",
+        "subtle": rf"\bord{style_outline + 3:g}\t(0,120,\bord{style_outline:g})",
         "fade": r"\alpha&HFF&\t(0,90,\alpha&H00&)",
         "normal": r"\fscx80\fscy80\t(0,80,\fscx108\fscy108)\t(80,150,\fscx100\fscy100)",
     }
     entrance = entrances[caption_pop] if caption_style == "capcut" else ""
     reset = {
         "off": "",
-        "subtle": r"\fscx100\fscy100",
+        "subtle": rf"\bord{style_outline:g}",
         "fade": r"\alpha&H00&",
         "normal": r"\fscx100\fscy100",
     }[caption_pop] if caption_style == "capcut" else ""
